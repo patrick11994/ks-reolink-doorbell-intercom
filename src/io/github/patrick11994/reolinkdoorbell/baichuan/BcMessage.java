@@ -15,6 +15,7 @@ final class BcMessage {
     static final int CLASS_LEGACY = 0x6514;  // "1465": 20-byte header, used once to fetch the nonce
     static final int CLASS_MODERN_20 = 0x6614;  // "1466": 20-byte header
     static final int CLASS_ZERO = 0x0000;  // 24-byte header
+    static final int MAX_BODY = 1024 * 1024;
 
     final int command;
     final int messageId;  // channel byte + 24-bit counter, little-endian, as one int
@@ -82,7 +83,8 @@ final class BcMessage {
         } else if (messageClass != CLASS_MODERN_20 && messageClass != CLASS_LEGACY) {
             throw new IOException("unknown Baichuan message class " + Integer.toHexString(messageClass));
         }
-        if (length < 0 || length > 16 * 1024 * 1024) throw new IOException("bad Baichuan body length " + length);
+        // Pushes and replies are a few KB; a device must not make the Kiosk Satellite process allocate more.
+        if (length < 0 || length > MAX_BODY) throw new IOException("bad Baichuan body length " + length);
         if (payloadOffset <= 0 || payloadOffset > length) payloadOffset = length;
         byte[] body = new byte[payloadOffset];
         in.readFully(body);

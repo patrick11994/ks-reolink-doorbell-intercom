@@ -68,6 +68,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Ringing | **Play a chime** | A soft ding-dong at the notification volume | on |
 | Ringing | **Wake the screen** | Turns the screen on and closes the screensaver on a ring | on |
 | Ringing | **Close the viewer after** | 30 seconds to 5 minutes, or Off. Counts only while it rings untouched. | 1 minute |
+| Ringing | **End a call after** | 5, 10 or 30 minutes, or Off. Counts from Answer, Speaker or opening it by hand, so a forgotten call does not keep the room on the line. | 10 minutes |
 | Video and audio | **Video** | *Main* (2560×1920, sharp) or *Sub* (640×480, light) | Main |
 | Video and audio | **Call volume** | How loud the doorbell plays on the panel. The slider on the call screen changes it too. | 70 |
 | Video and audio | **Microphone** | Automatic, or a fixed Android microphone source: Camcorder, Voice communication, Microphone, Voice recognition or Unprocessed | Automatic |
@@ -87,6 +88,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 
 - **Talking has a delay of about 2 seconds.** The doorbell itself holds about 2.1 s of incoming audio before it plays it. The Reolink app and HomeKit have the same delay, and this plugin adds less than 0.1 s to it. A red *Speaking* label reminds you while the microphone is on. In practice the conversation simply takes turns.
 - **Echo.** The doorbell's sound plays as call audio, so panels with echo suppression for calls keep your own speaker out of the microphone. If a visitor hears themselves, turn the panel's speaker down, or turn off **Speaker** while you talk.
+- **The wake word** pauses during a call. While the doorbell's sound plays or the microphone is on, the plugin mutes Kiosk Satellite's wake word, so the door cannot trigger the assistant, and then unmutes it afterwards. A wake word you muted yourself stays muted.
 - **Which microphone.** Panels differ in which Android microphone source really works; on an RK3576 panel only *Camcorder* does. **Automatic** uses the first source that opens, Camcorder first, and keeps it for the whole call. If the door does not hear you, pick another one under **Microphone**.
 
 ## Privacy and security
@@ -94,7 +96,8 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 - **Nothing leaves your network.** The plugin connects only to the doorbell, on two ports: 9000 (button presses) and 554 (RTSP video and sound, and the ONVIF audio backchannel for talking). It has no analytics, and it contacts no other service.
 - **The doorbell password** is stored as a Kiosk Satellite secret setting. Plugin Manager and Remote Admin mask it. Use a separate, non-admin Reolink user for the panel.
 - **The connections are not encrypted.** Reolink's local protocols are not, so keep the doorbell and the panel on a trusted network.
-- **The microphone** is only on while the call screen shows **Microphone** as on. Nothing is recorded or stored.
+- **The microphone** is only on while the call screen shows **Microphone** as on, and every call ends after **End a call after**. Nothing is recorded or stored.
+- **What the doorbell sends is size-limited.** The plugin runs inside Kiosk Satellite, so it caps every answer, header line, video frame and push, and refuses XML with a DOCTYPE. A broken or hostile device on the network cannot take the app down.
 - **The plugin runs inside Kiosk Satellite** with its permissions, like every plugin. Review the code before you trust it.
 
 ## Troubleshooting

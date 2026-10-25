@@ -31,6 +31,9 @@ public final class RtspSession {
         void onClosed(String reason);
     }
 
+    /** The most a device may make us allocate: it runs inside Kiosk Satellite, so a broken one must not take it down. */
+    static final int MAX_BODY = 64 * 1024;
+    static final int MAX_LINE = 8 * 1024;
     private static final Pattern REALM = Pattern.compile("realm=\"([^\"]*)\"");
     private static final Pattern NONCE = Pattern.compile("nonce=\"([^\"]*)\"");
 
@@ -280,7 +283,7 @@ public final class RtspSession {
             if (colon <= 0) continue;
             String key = line.substring(0, colon).trim().toLowerCase(Locale.ROOT), value = line.substring(colon + 1).trim();
             response.headers.put(key, value);
-            if (key.equals("content-length")) length = Integer.parseInt(value);
+            if (key.equals("content-length")) length = contentLength(value);
         }
         if (length > 0) {
             byte[] body = new byte[length];
@@ -294,14 +297,29 @@ public final class RtspSession {
         int length = 0;
         line(in);  // rest of the status line
         for (String line = line(in); !line.isEmpty(); line = line(in)) {
-            if (line.toLowerCase(Locale.ROOT).startsWith("content-length:")) length = Integer.parseInt(line.substring(15).trim());
+            if (line.toLowerCase(Locale.ROOT).startsWith("content-length:")) length = contentLength(line.substring(15).trim());
         }
         in.skipBytes(length);
     }
 
+    private static int contentLength(String value) throws IOException {
+        int length;
+        try {
+            length = Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            throw new IOException("bad Content-Length");
+        }
+        if (length < 0 || length > MAX_BODY) throw new IOException("RTSP body of " + length + " bytes is too large");
+        return length;
+    }
+
     private static String line(InputStream in) throws IOException {
         ByteArrayOutputStream line = new ByteArrayOutputStream();
-        for (int c = in.read(); c >= 0 && c != '\n'; c = in.read()) if (c != '\r') line.write(c);
+        for (int c = in.read(); c >= 0 && c != '\n'; c = in.read()) {
+            if (c == '\r') continue;
+            if (line.size() >= MAX_LINE) throw new IOException("RTSP header line too long");
+            line.write(c);
+        }
         return new String(line.toByteArray(), StandardCharsets.UTF_8);
     }
 }

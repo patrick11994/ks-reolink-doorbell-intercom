@@ -39,6 +39,8 @@ public final class RingController {
     private boolean speakerOn;
     private boolean micOn;
     private long autoCloseMillis;
+    private long maxCallMillis;
+    private long callStarted;  // when listening, talking or watching by hand began
 
     public interface Clock {
         long now();
@@ -64,6 +66,11 @@ public final class RingController {
 
     public synchronized void setAutoCloseMillis(long millis) {
         autoCloseMillis = millis;
+    }
+
+    /** The longest a call may last once it is answered or opened, so a forgotten call does not keep the room on the line. */
+    public synchronized void setMaxCallMillis(long millis) {
+        maxCallMillis = millis;
     }
 
     /** The doorbell's visitor flag, from every push. Only the rising edge rings. */
@@ -97,6 +104,7 @@ public final class RingController {
         counting = false;
         speakerOn = false;
         micOn = false;
+        callStarted = clock.now();
         actions.openViewer(state, false);
         actions.countdown(0, 0);
     }
@@ -105,6 +113,7 @@ public final class RingController {
     public synchronized void speaker() {
         if (state != State.RINGING) return;
         state = State.LISTENING;
+        callStarted = clock.now();
         stopCountdown();  // someone is paying attention: no auto-close for the rest of the call
         speakerOn = true;
         micOn = false;
@@ -115,7 +124,10 @@ public final class RingController {
     /** Ringing or listening: talk, with the speaker on too. */
     public synchronized void answer() {
         if (state != State.RINGING && state != State.LISTENING) return;
-        if (state == State.RINGING) stopCountdown();
+        if (state == State.RINGING) {
+            stopCountdown();
+            callStarted = clock.now();
+        }
         state = State.IN_CALL;
         speakerOn = true;
         micOn = true;
@@ -156,10 +168,14 @@ public final class RingController {
         if (state == State.RINGING && counting) restartCountdown(clock.now());
     }
 
-    /** Called about once a second: closes a viewer that rang untouched. Listening or a call never closes on its own. */
+    /** Called about once a second: closes a viewer that rang untouched, and ends a call that reached its maximum length. */
     public synchronized void tick() {
-        if (state != State.RINGING || !counting || autoCloseMillis <= 0) return;
-        if (clock.now() - lastActivity >= autoCloseMillis) hangUp();
+        if (state == State.IDLE) return;
+        if (state == State.RINGING) {
+            if (counting && autoCloseMillis > 0 && clock.now() - lastActivity >= autoCloseMillis) hangUp();
+            return;
+        }
+        if (maxCallMillis > 0 && clock.now() - callStarted >= maxCallMillis) hangUp();
     }
 
     private void restartCountdown(long now) {
