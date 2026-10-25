@@ -10,16 +10,18 @@ import io.github.patrick11994.reolinkdoorbell.talk.Downsampler;
 
 /**
  * The panel microphone into the backchannel, 10 ms at a time. Panels differ in which source really delivers audio:
- * on an RK3576 panel only CAMCORDER does, while MIC, VOICE_COMMUNICATION and VOICE_RECOGNITION go silent after a
- * second. So each source is tried in turn, and one that sends exact digital silence after a warm-up second counts as
- * dead (a live microphone always has some noise). The first source that works is remembered for later calls.
- * Records only while the microphone is on.
+ * on an RK3576 panel only CAMCORDER does, while MIC, VOICE_COMMUNICATION and VOICE_RECOGNITION go silent. Silence
+ * cannot tell a dead source apart, because Rockchip drivers also turn a quiet room into exact zeros, so the source
+ * is picked once per call and kept: the one from the Microphone setting, or in Automatic the first that opens,
+ * CAMCORDER first. Records only while the microphone is on.
  */
 final class MicCapture {
     interface Listener {
         void onMicState(String state);
     }
 
+    /** The Microphone setting's options, in Automatic's order. */
+    static final String[] CHOICES = {"Camcorder", "Voice communication", "Microphone", "Voice recognition", "Unprocessed"};
     private static final int[] SOURCES = {
         MediaRecorder.AudioSource.CAMCORDER,
         MediaRecorder.AudioSource.VOICE_COMMUNICATION,
@@ -27,20 +29,18 @@ final class MicCapture {
         MediaRecorder.AudioSource.VOICE_RECOGNITION,
         Build.VERSION.SDK_INT >= 24 ? MediaRecorder.AudioSource.UNPROCESSED : MediaRecorder.AudioSource.DEFAULT,
     };
-    private static final String[] NAMES = {"CAMCORDER", "VOICE_COMMUNICATION", "MIC", "VOICE_RECOGNITION", "UNPROCESSED"};
     private static final int[] RATES = {48000, 16000};
-    private static final int WARM_UP_MILLIS = 1000;
-    private static final int SILENT_MILLIS = 1000;  // this long of exact zeros after the warm-up: the source is dead
-
-    private static volatile int working = -1;  // index into SOURCES that delivered audio, for the next call
 
     private final Backchannel backchannel;
     private final Listener listener;
+    private final String choice;
     private volatile boolean running = true;
     private final Thread thread;
 
-    MicCapture(Backchannel backchannel, Listener listener) {
+    /** choice is the Microphone setting: one of CHOICES, or Automatic. */
+    MicCapture(Backchannel backchannel, String choice, Listener listener) {
         this.backchannel = backchannel;
+        this.choice = choice;
         this.listener = listener;
         thread = new Thread(this::run, "reolink-mic");
         thread.setDaemon(true);
@@ -58,66 +58,45 @@ final class MicCapture {
     }
 
     private void run() {
-        int first = working >= 0 ? working : 0;
-        for (int attempt = 0; attempt < SOURCES.length && running; attempt++) {
-            int index = (first + attempt) % SOURCES.length;
-            Result result = capture(index);
-            if (result == Result.STOPPED) return;
-            if (result == Result.WORKED) return;
-            if (working == index) working = -1;  // the remembered source stopped working: search again
-        }
-        if (running) listener.onMicState("no working microphone found");
-        backchannel.clear();
-    }
-
-    private enum Result { STOPPED, WORKED, UNAVAILABLE, SILENT }
-
-    /** Records from one source until stopped; reports SILENT or UNAVAILABLE so the next source can be tried. */
-    private Result capture(int index) {
         AudioRecord recorder = null;
         int rate = 0;
-        for (int r : RATES) {
-            recorder = open(SOURCES[index], r);
-            if (recorder != null) {
-                rate = r;
-                break;
+        String opened = null;
+        for (int i = 0; i < SOURCES.length && recorder == null; i++) {
+            if (!choice.equals("Automatic") && !choice.equals(CHOICES[i])) continue;
+            for (int r : RATES) {
+                recorder = open(SOURCES[i], r);
+                if (recorder != null) {
+                    rate = r;
+                    opened = CHOICES[i];
+                    break;
+                }
             }
         }
-        if (recorder == null) return Result.UNAVAILABLE;
+        if (recorder == null) {
+            listener.onMicState("no microphone (" + choice + ")");
+            return;
+        }
         try {
             recorder.startRecording();
-            if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) return Result.UNAVAILABLE;
+            if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
+                listener.onMicState("the microphone is in use elsewhere");
+                return;
+            }
+            listener.onMicState("live, " + opened + " " + rate + " Hz");
             Downsampler downsampler = new Downsampler(rate, Backchannel.RATE);
             short[] chunk = new short[rate / 100];  // 10 ms
             short[] out = new short[chunk.length];
-            long samples = 0, silentRun = 0;
-            boolean confirmed = index == working;
-            if (confirmed) listener.onMicState("live, " + NAMES[index]);
             while (running) {
                 int read = recorder.read(chunk, 0, chunk.length);
-                if (read < 0) return Result.UNAVAILABLE;
-                samples += read;
-                boolean silent = true;
-                for (int i = 0; i < read && silent; i++) silent = chunk[i] == 0;
-                silentRun = silent ? silentRun + read : 0;
-                if (samples > (long) rate * WARM_UP_MILLIS / 1000) {
-                    if (silentRun >= (long) rate * SILENT_MILLIS / 1000) {
-                        backchannel.clear();
-                        return Result.SILENT;
-                    }
-                    // Dead sources on the RK3576 still send noise for about a second: only trust one past that window.
-                    if (!confirmed && silentRun == 0 && samples > (long) rate * (WARM_UP_MILLIS + SILENT_MILLIS) / 1000) {
-                        confirmed = true;
-                        working = index;
-                        listener.onMicState("live, " + NAMES[index]);
-                    }
+                if (read < 0) {
+                    listener.onMicState("microphone read error " + read);
+                    return;
                 }
                 int n = downsampler.process(chunk, read, out, 0);
                 if (n > 0) backchannel.write(out, n);
             }
-            return confirmed ? Result.WORKED : Result.STOPPED;
         } catch (RuntimeException error) {
-            return running ? Result.UNAVAILABLE : Result.STOPPED;
+            if (running) listener.onMicState("microphone: " + error);
         } finally {
             try {
                 recorder.stop();
@@ -125,7 +104,7 @@ final class MicCapture {
                 // Not started.
             }
             recorder.release();
-            if (!running) backchannel.clear();
+            backchannel.clear();
         }
     }
 
@@ -137,7 +116,7 @@ final class MicCapture {
             if (recorder.getState() == AudioRecord.STATE_INITIALIZED) return recorder;
             recorder.release();
         } catch (RuntimeException unsupported) {
-            // Try the next source or rate.
+            // Try the next rate or source.
         }
         return null;
     }
