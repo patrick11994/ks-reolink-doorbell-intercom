@@ -4,6 +4,10 @@ A [Kiosk Satellite](https://kiosksatellite.com) plugin that turns a wall panel i
 
 The plugin talks to the doorbell directly on your own network. It needs no Home Assistant, go2rtc, Scrypted, cloud account or other server in between.
 
+<p align="center">
+  <img src="docs/screenshot.jpg" alt="The call screen on a wall panel: the doorbell's live video, with Microphone, Speaker and End call below it" width="320">
+</p>
+
 *Not affiliated with or endorsed by Reolink or the Kiosk Satellite project. Reolink is a trademark of its owner.*
 
 ## Features
@@ -66,6 +70,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Ringing | **Close the viewer after** | 30 seconds to 5 minutes, or Off. Counts only while it rings untouched. | 1 minute |
 | Video and audio | **Video** | *Main* (2560×1920, sharp) or *Sub* (640×480, light) | Main |
 | Video and audio | **Call volume** | How loud the doorbell plays on the panel. The slider on the call screen changes it too. | 70 |
+| Video and audio | **Microphone** | Automatic, or a fixed Android microphone source: Camcorder, Voice communication, Microphone, Voice recognition or Unprocessed | Automatic |
 | Video and audio | **Language** | Automatic (the panel's Android language), English or Nederlands | Automatic |
 
 **Actions:**
@@ -82,7 +87,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 
 - **Talking has a delay of about 2 seconds.** The doorbell itself holds about 2.1 s of incoming audio before it plays it. The Reolink app and HomeKit have the same delay, and this plugin adds less than 0.1 s to it. A red *Speaking* label reminds you while the microphone is on. In practice the conversation simply takes turns.
 - **Echo.** The doorbell's sound plays as call audio, so panels with echo suppression for calls keep your own speaker out of the microphone. If a visitor hears themselves, turn the panel's speaker down, or turn off **Speaker** while you talk.
-- **Which microphone.** The plugin tries every microphone mode Android offers, and skips one that delivers only digital silence. Some panels have only one working mode.
+- **Which microphone.** Panels differ in which Android microphone source really works; on an RK3576 panel only *Camcorder* does. **Automatic** uses the first source that opens, Camcorder first, and keeps it for the whole call. If the door does not hear you, pick another one under **Microphone**.
 
 ## Privacy and security
 
@@ -101,6 +106,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | **Check** says video does not work | Turn on RTSP in the Reolink app's Server Settings |
 | **Check** says there is no talk channel | Turn on ONVIF in the Reolink app's Server Settings |
 | The call screen stays on *Connecting to the doorbell…* | Run **Check**. Then look at Kiosk Satellite's **Logs** (in the settings or in Remote Admin). The plugin writes what failed there. |
+| The door does not hear you | Try another source under **Microphone**, and check that Kiosk Satellite has the microphone permission |
 | You hear nothing with Speaker on | Raise the slider on the call screen. It sets Android's call volume, which is separate from the media volume. |
 
 ## Building
