@@ -1,0 +1,265 @@
+// SPDX-License-Identifier: Apache-2.0
+package io.github.patrick11994.reolinkdoorbell.baichuan;
+
+import java.io.BufferedInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Keeps one Baichuan (TCP 9000) session to the doorbell open for push events: nonce, login, subscribe, keepalive,
+ * and reconnect with backoff. Everything runs on one thread the client owns; listener calls come from that thread.
+ * Protocol knowledge from reolink_aio (MIT), reimplemented here.
+ */
+public final class BaichuanClient {
+    public interface Listener {
+        /** Connecting, connected, or why the session dropped. */
+        void onConnection(boolean connected, String detail);
+        /** Every channel in every cmd 33 push, in order. */
+        void onAlarm(AlarmEvents.Event event);
+    }
+
+    static final int CMD_LOGIN = 1;
+    static final int CMD_SUBSCRIBE = 31;
+    static final int CMD_ALARM = 33;
+    static final int CMD_KEEPALIVE = 93;
+    static final int CHANNEL_HOST = 250;
+    static final int CHANNEL_PUSH = 251;
+    private static final Pattern NONCE = Pattern.compile("<nonce>([^<]+)</nonce>");
+    private static final boolean TRACE = Boolean.getBoolean("baichuan.trace");  // -Dbaichuan.trace=true for the Mac-side live check
+    private static final Pattern SIG_VER = Pattern.compile("<sigVer>([^<]+)</sigVer>");
+
+    private final String host;
+    private final int port;
+    private final String username;
+    private final String password;
+    private final Listener listener;
+    private final long keepaliveMillis;
+    private final int timeoutMillis;
+    private volatile boolean running;
+    private volatile Socket socket;
+    private Thread thread;
+    private int counter;
+    private byte[] aesKey;
+    private long connectedSince;
+
+    public BaichuanClient(String host, int port, String username, String password, Listener listener) {
+        this(host, port, username, password, listener, 25_000, 5_000);
+    }
+
+    BaichuanClient(String host, int port, String username, String password, Listener listener, long keepaliveMillis, int timeoutMillis) {
+        this.host = host;
+        this.port = port;
+        this.username = username;
+        this.password = password;
+        this.listener = listener;
+        this.keepaliveMillis = keepaliveMillis;
+        this.timeoutMillis = timeoutMillis;
+    }
+
+    public synchronized void start() {
+        if (running) return;
+        running = true;
+        thread = new Thread(this::run, "reolink-baichuan");
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    /** Stops and waits up to a second for the thread, so a plugin stop leaves nothing running. */
+    public void stop() {
+        Thread current;
+        synchronized (this) {
+            running = false;
+            current = thread;
+            thread = null;
+        }
+        closeSocket();
+        if (current != null) {
+            current.interrupt();
+            try {
+                current.join(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void run() {
+        long backoff = 2_000;
+        while (running) {
+            connectedSince = 0;
+            try {
+                listener.onConnection(false, "connecting");
+                session();
+            } catch (LoginRefused refused) {
+                listener.onConnection(false, refused.getMessage());
+                backoff = 60_000;  // wrong credentials: do not hammer the doorbell's login limiter
+            } catch (IOException | RuntimeException error) {
+                if (running) listener.onConnection(false, describe(error));
+            } finally {
+                closeSocket();
+            }
+            // A session that held for a minute was healthy: start the backoff over.
+            if (connectedSince > 0 && System.currentTimeMillis() - connectedSince > 60_000) backoff = 2_000;
+            if (!running) break;
+            try {
+                Thread.sleep(backoff);
+            } catch (InterruptedException e) {
+                break;
+            }
+            backoff = Math.min(30_000, backoff * 2);
+        }
+    }
+
+    /** One connected session: returns or throws when it ends. */
+    private void session() throws IOException {
+        Socket s = new Socket();
+        socket = s;
+        DataInputStream in = connect(s);
+        OutputStream out = s.getOutputStream();
+        login(in, out);
+
+        // 3. Subscribe to pushes, then keep the session alive.
+        int subscribeId = nextId(CHANNEL_PUSH);
+        out.write(BcMessage.encodeModern(CMD_SUBSCRIBE, subscribeId, new byte[0], new byte[0]));
+        out.flush();
+        connectedSince = System.currentTimeMillis();
+        listener.onConnection(true, "connected");
+        s.setSoTimeout(1000);
+        long lastReceived = System.currentTimeMillis();
+        boolean pushesSeen = false;
+        while (running) {
+            BcMessage message;
+            try {
+                message = trace(BcMessage.read(in));
+            } catch (SocketTimeoutException quiet) {
+                if (System.currentTimeMillis() - lastReceived > keepaliveMillis) {
+                    // reolink_aio: LinkType (93) keeps a live subscription open; re-subscribing revives a silent one.
+                    int id = nextId(pushesSeen ? CHANNEL_HOST : CHANNEL_PUSH);
+                    out.write(BcMessage.encodeModern(pushesSeen ? CMD_KEEPALIVE : CMD_SUBSCRIBE, id, new byte[0], new byte[0]));
+                    out.flush();
+                    lastReceived = System.currentTimeMillis();  // allow one interval for the answer before sending again
+                }
+                if (System.currentTimeMillis() - lastReceived > 3 * keepaliveMillis) throw new IOException("the doorbell stopped answering");
+                continue;
+            }
+            lastReceived = System.currentTimeMillis();
+            if (message.command == CMD_ALARM) {
+                pushesSeen = true;
+                List<AlarmEvents.Event> events = AlarmEvents.parse(decode(message, false));
+                for (AlarmEvents.Event event : events) listener.onAlarm(event);
+            }
+        }
+    }
+
+    /**
+     * Logs in once and disconnects, for the settings page's check. Throws with a message a person can act on:
+     * a wrong address, a refused login or an account device.
+     */
+    public static void verify(String host, int port, String username, String password) throws IOException {
+        BaichuanClient client = new BaichuanClient(host, port, username, password, new Listener() {
+            @Override public void onConnection(boolean connected, String detail) {}
+            @Override public void onAlarm(AlarmEvents.Event event) {}
+        });
+        try (Socket s = new Socket()) {
+            DataInputStream in = client.connect(s);
+            client.login(in, s.getOutputStream());
+        }
+    }
+
+    private DataInputStream connect(Socket s) throws IOException {
+        s.setTcpNoDelay(true);
+        s.connect(new InetSocketAddress(host, port), timeoutMillis);
+        s.setSoTimeout(timeoutMillis);
+        return new DataInputStream(new BufferedInputStream(s.getInputStream()));
+    }
+
+    /** The nonce exchange and the login; afterwards aesKey decrypts what the doorbell sends. */
+    private void login(DataInputStream in, OutputStream out) throws IOException {
+        // 1. A header-only legacy request: the reply carries the nonce, XOR-encrypted.
+        int nonceId = nextId(CHANNEL_HOST);
+        out.write(BcMessage.encodeNonceRequest(nonceId));
+        out.flush();
+        String nonceReply = decode(await(in, CMD_LOGIN, nonceId), true);
+        Matcher sig = SIG_VER.matcher(nonceReply);
+        if (sig.find() && "v3".equals(sig.group(1)))
+            throw new LoginRefused("the doorbell is set up as a Reolink 'account device', which blocks local login");
+        Matcher nonce = NONCE.matcher(nonceReply);
+        if (!nonce.find()) throw new IOException("no nonce in the login reply");
+        aesKey = BcCrypto.aesKey(nonce.group(1), password);
+
+        // 2. Login with hashed credentials, XOR-encrypted.
+        String login = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<LoginUser version=\"1.1\">\n"
+            + "<userName>" + BcCrypto.md5Modern(username + nonce.group(1)) + "</userName>\n"
+            + "<password>" + BcCrypto.md5Modern(password + nonce.group(1)) + "</password>\n"
+            + "<userVer>1</userVer>\n</LoginUser>\n<LoginNet version=\"1.1\">\n<type>LAN</type>\n<udpPort>0</udpPort>\n</LoginNet>\n</body>\n";
+        int loginId = nextId(CHANNEL_HOST);
+        out.write(BcMessage.encodeModern(CMD_LOGIN, loginId, new byte[0], BcCrypto.xor(login.getBytes(StandardCharsets.UTF_8), CHANNEL_HOST)));
+        out.flush();
+        BcMessage loginReply = await(in, CMD_LOGIN, loginId);
+        if (loginReply.headerLength == 24 && loginReply.statusOrEncryption == 401) throw new LoginRefused("the doorbell refused the username or password");
+        if (loginReply.headerLength == 24 && loginReply.statusOrEncryption != 200) throw new IOException("login failed with status " + loginReply.statusOrEncryption);
+    }
+
+    /** Reads until the reply to (command, id) arrives; pushes that arrive meanwhile are delivered. */
+    private BcMessage await(DataInputStream in, int command, int id) throws IOException {
+        while (true) {
+            BcMessage message = trace(BcMessage.read(in));
+            if (message.command == command && message.messageId == id) return message;
+            if (message.command == CMD_ALARM && aesKey != null) {
+                for (AlarmEvents.Event event : AlarmEvents.parse(decode(message, false))) listener.onAlarm(event);
+            }
+        }
+    }
+
+    /** Decrypts a body: XOR for the login exchange, AES after it, as the header says. */
+    private String decode(BcMessage message, boolean expectXor) {
+        if (message.body.length == 0) return "";
+        int encryption = message.statusOrEncryption;
+        boolean xor = expectXor || (message.headerLength == 20 && (encryption == 0xdd01 || encryption == 0xdd12));
+        byte[] plain = xor ? BcCrypto.xor(message.body, message.channelByte()) : BcCrypto.aes(aesKey, message.body, false);
+        return new String(plain, StandardCharsets.UTF_8);
+    }
+
+    private static BcMessage trace(BcMessage message) {
+        if (TRACE) System.out.println("  <- cmd " + message.command + " id " + Integer.toHexString(message.messageId) + " status/enc "
+            + Integer.toHexString(message.statusOrEncryption) + " class " + Integer.toHexString(message.messageClass) + " body " + message.body.length + " payload " + message.payload.length);
+        return message;
+    }
+
+    private int nextId(int channel) {
+        counter = (counter + 1) & 0xFFFFFF;
+        return (channel & 0xFF) | (counter << 8);
+    }
+
+    private void closeSocket() {
+        Socket s = socket;
+        socket = null;
+        if (s != null) {
+            try {
+                s.close();
+            } catch (IOException ignored) {
+                // Closing is best effort.
+            }
+        }
+    }
+
+    private static String describe(Throwable error) {
+        String message = error.getMessage();
+        return error.getClass().getSimpleName() + (message == null ? "" : ": " + message);
+    }
+
+    /** The doorbell answered but refused this login: wrong credentials or an account device. */
+    public static final class LoginRefused extends IOException {
+        LoginRefused(String message) {
+            super(message);
+        }
+    }
+}

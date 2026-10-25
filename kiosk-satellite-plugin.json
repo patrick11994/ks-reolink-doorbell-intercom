@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "apiVersion": 1,
+  "id": "reolink-doorbell",
+  "name": "Reolink Doorbell Intercom",
+  "version": "0.5.0",
+  "minAndroidSdk": 26,
+  "entryClass": "io.github.patrick11994.reolinkdoorbell.ReolinkPlugin",
+  "description": "Rings the panel when someone presses a Reolink video doorbell, and opens a full-screen doorbell viewer. Connects directly to the doorbell on your network: no Home Assistant, go2rtc or cloud in between. Live video, listening and talking to the door.",
+  "author": "patrick11994",
+  "license": "Apache-2.0",
+  "icon": "icon.png",
+  "capabilities": ["overlay", "host.control", "entities"],
+  "settings": [
+    {"key": "host", "type": "string", "title": "Doorbell address", "default": "", "group": "Doorbell", "description": "IP address or hostname of the doorbell on your network, for example 192.168.1.50."},
+    {"key": "username", "type": "string", "title": "Username", "default": "", "group": "Doorbell", "description": "A Reolink user on the doorbell. A separate non-admin user is enough and recommended."},
+    {"key": "password", "type": "secret", "title": "Password", "default": "", "group": "Doorbell"},
+    {"key": "name", "type": "string", "title": "Name", "default": "", "group": "Doorbell", "description": "Shown at the top of the viewer. Empty shows Front door, in the plugin's language."},
+    {"key": "chime", "type": "boolean", "title": "Play a chime", "default": true, "group": "Ringing", "description": "A ding-dong at the notification volume when the button is pressed."},
+    {"key": "wakeScreen", "type": "boolean", "title": "Wake the screen", "default": true, "group": "Ringing", "description": "Turn the screen on and close the screensaver when the button is pressed."},
+    {"key": "stream", "type": "select", "title": "Video", "default": "Main (sharp)", "options": ["Main (sharp)", "Sub (light)"], "group": "Video and audio", "description": "Main is 2560x1920, sub is 640x480. Both come straight from the doorbell."},
+    {"key": "callVolume", "type": "number", "title": "Call volume", "default": 70, "min": 0, "max": 100, "step": 5, "group": "Video and audio", "description": "How loud the doorbell plays on the panel. The viewer has a slider for it too."},
+    {"key": "language", "type": "select", "title": "Language", "default": "Automatic", "options": ["Automatic", "English", "Nederlands"], "group": "Video and audio", "description": "For the viewer, readings and messages. Automatic follows the panel's Android language."},
+    {"key": "autoClose", "type": "select", "title": "Close the viewer after", "default": "1 minute", "options": ["30 seconds", "1 minute", "2 minutes", "5 minutes", "Off"], "group": "Ringing", "description": "After a doorbell press, while nobody touches it; a ring around Hang up shows the time left. A touch starts it over, Speaker or Answer stop it. Opened by hand, it stays open."}
+  ],
+  "buttons": [
+    {"id": "check", "title": "Check the doorbell", "label": "Check", "group": "Doorbell", "description": "Checks the address, username and password, and that button presses, video and talking all work.", "visibleWhen": {"key": "host", "notEmpty": true}}
+  ],
+  "commands": [
+    {"id": "show", "title": "Open"},
+    {"id": "testRing", "title": "Test ring"},
+    {"id": "dismiss", "title": "Close"}
+  ],
+  "triggers": [
+    {"id": "doorbellPressed", "title": "Doorbell pressed"}
+  ]
+}
