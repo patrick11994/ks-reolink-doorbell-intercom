@@ -5,6 +5,7 @@
   "name": "Reolink Doorbell Intercom",
   "version": "0.5.0",
   "minAndroidSdk": 26,
+  "minAppVersion": "2026.10.38",
   "entryClass": "io.github.patrick11994.reolinkdoorbell.ReolinkPlugin",
   "description": "Rings the panel when someone presses a Reolink video doorbell, and opens a full-screen doorbell viewer. Connects directly to the doorbell on your network: no Home Assistant, go2rtc or cloud in between. Live video, listening and talking to the door.",
   "author": "patrick11994",
