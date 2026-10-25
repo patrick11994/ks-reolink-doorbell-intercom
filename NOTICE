@@ -1,0 +1,17 @@
+Reolink Doorbell Intercom for Kiosk Satellite
+Copyright 2026 patrick11994
+
+This product includes software from:
+
+- Kiosk Satellite plugin SDK, template and build tools
+  https://github.com/jxlarrea/kiosk-satellite-plugins (Apache-2.0)
+
+Protocol knowledge, not code, comes from:
+
+- reolink_aio (MIT), for the Reolink Baichuan login and push events
+  https://github.com/starkillerOG/reolink_aio
+- Scrypted, for talking over the ONVIF RTSP audio backchannel
+  https://github.com/koush/scrypted
+
+Reolink is a trademark of its owner. This project is not affiliated with
+or endorsed by Reolink or the Kiosk Satellite project.
