@@ -24,6 +24,8 @@ public final class MediaTest {
         h264DropsBrokenFragment();
         aacFrames();
         hubReplaysFromKeyframe();
+        h264DropsRunawayFrame();
+        rtspRefusesHugeAnswers();
         System.out.println("MediaTest passed");
     }
 
@@ -125,6 +127,57 @@ public final class MediaTest {
             check(seen.toString(), "[4@80000K, 5@120000, 6@160000]");
         } catch (ReflectiveOperationException e) {
             throw new AssertionError(e);
+        }
+    }
+
+    /** A stream that never ends a frame must not grow memory without bound: the frame is dropped at the cap. */
+    static void h264DropsRunawayFrame() {
+        List<Integer> sizes = new ArrayList<>();
+        H264Depacketizer d = new H264Depacketizer((au, ts, key) -> sizes.add(au.length));
+        byte[] chunk = new byte[60_000];
+        chunk[0] = 0x41;  // slice NAL, but every packet without the marker and with the same timestamp
+        int packets = H264Depacketizer.MAX_UNIT / chunk.length + 10;
+        for (int i = 0; i < packets; i++) d.onRtp(rtp(i, 1000, false, chunk), 0, 12 + chunk.length);
+        d.onRtp(rtp(packets, 1000, true, new byte[] {0x41, 1}), 0, 14);
+        check(sizes.size(), 1);
+        check(sizes.get(0) <= H264Depacketizer.MAX_UNIT, true);
+        d.onRtp(rtp(packets + 1, 4600, true, new byte[] {0x41, 2}), 0, 14);  // the next normal frame still comes through
+        check(sizes.get(sizes.size() - 1), 6);
+    }
+
+    /** An RTSP answer may not announce a giant body or send an endless header line. */
+    static void rtspRefusesHugeAnswers() {
+        String[] answers = {
+            "RTSP/1.0 200 OK\r\nCSeq: 1\r\nContent-Length: 10485760\r\n\r\n",
+            "RTSP/1.0 200 OK\r\nCSeq: 1\r\nX-Junk: " + new String(new char[RtspSession.MAX_LINE + 10]).replace('\0', 'a') + "\r\n\r\n",
+        };
+        for (String answer : answers) {
+            try (java.net.ServerSocket server = new java.net.ServerSocket(0)) {
+                Thread fake = new Thread(() -> {
+                    try (java.net.Socket socket = server.accept()) {
+                        socket.getInputStream().read(new byte[4096]);
+                        socket.getOutputStream().write(answer.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                        Thread.sleep(500);
+                    } catch (Exception closed) {
+                        // The client gave up, as it should.
+                    }
+                });
+                fake.start();
+                RtspSession session = new RtspSession("127.0.0.1", server.getLocalPort(), "/x", "u", "p");
+                String outcome;
+                try {
+                    session.describe(java.util.Collections.<String, String>emptyMap());
+                    outcome = "accepted";
+                } catch (java.io.IOException refused) {
+                    outcome = refused.getMessage().contains("too") ? "refused" : "failed: " + refused.getMessage();
+                } finally {
+                    session.close();
+                }
+                check(outcome, "refused");
+                fake.join(2000);
+            } catch (Exception e) {
+                throw new AssertionError(e);
+            }
         }
     }
 

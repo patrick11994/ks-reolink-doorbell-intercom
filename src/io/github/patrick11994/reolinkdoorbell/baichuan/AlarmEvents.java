@@ -44,9 +44,16 @@ public final class AlarmEvents {
     public static List<Event> parse(String xml) {
         List<Event> events = new ArrayList<>();
         if (xml == null || xml.trim().isEmpty()) return events;
+        // The doorbell never sends a DOCTYPE; refusing any keeps entity tricks out entirely.
+        if (xml.toUpperCase(Locale.ROOT).contains("<!DOCTYPE")) return events;
         try {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             factory.setExpandEntityReferences(false);
+            try {
+                factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            } catch (Exception unsupported) {
+                // Android's parser may not know the feature; the check above already refused a DOCTYPE.
+            }
             javax.xml.parsers.DocumentBuilder builder = factory.newDocumentBuilder();
             builder.setErrorHandler(null);  // the default handler prints every malformed push to stderr
             Document document = builder.parse(new ByteArrayInputStream(xml.trim().getBytes(StandardCharsets.UTF_8)));

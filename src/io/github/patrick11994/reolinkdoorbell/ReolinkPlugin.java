@@ -37,6 +37,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private volatile DoorbellView view;
     private BaichuanClient events;
     private ScheduledExecutorService ticker;
+    private volatile WakeWordGuard wakeWord;
     // The call's media, all guarded by this.
     private StreamHub stream;
     private VideoRenderer videoRenderer;
@@ -53,6 +54,32 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         settings = new Settings(values);
         texts = Texts.of(settings.language);
         controller = new RingController(this, System::currentTimeMillis, settings.autoCloseMillis);
+        controller.setMaxCallMillis(settings.maxCallMillis);
+        wakeWord = new WakeWordGuard(new WakeWordGuard.Host() {
+            @Override public void command(String name, Map<String, Object> arguments, WakeWordGuard.Result result) {
+                PluginHost h = ReolinkPlugin.this.host;
+                if (h == null) {
+                    result.done(false, null);
+                    return;
+                }
+                try {
+                    h.executeCommand(name, arguments, (ok, data, error) -> result.done(ok, data));
+                } catch (RuntimeException unavailable) {
+                    result.done(false, null);  // an older Kiosk Satellite, or the session ended
+                }
+            }
+
+            @Override public void remember(boolean mutedByUs) {
+                PluginHost h = ReolinkPlugin.this.host;
+                if (h == null) return;
+                try {
+                    h.updateSettings(Collections.<String, Object>singletonMap("wakeWordRestore", mutedByUs));
+                } catch (RuntimeException | LinkageError older) {
+                    // Without it, only a crash mid-call could leave the wake word muted.
+                }
+            }
+        });
+        wakeWord.restore(settings.wakeWordRestore);
         ticker = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread thread = new Thread(r, "reolink-ticker");
             thread.setDaemon(true);
@@ -71,7 +98,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         settings = new Settings(values);
         texts = Texts.of(settings.language);
         RingController c = controller;
-        if (c != null) c.setAutoCloseMillis(settings.autoCloseMillis);
+        if (c != null) {
+            c.setAutoCloseMillis(settings.autoCloseMillis);
+            c.setMaxCallMillis(settings.maxCallMillis);
+        }
         if (previous == null || !previous.sameConnection(settings)) connect();
     }
 
@@ -208,6 +238,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     }
 
     @Override public synchronized void setAudio(boolean speakerOn, boolean micOn) {
+        WakeWordGuard guard = wakeWord;
+        if (guard != null) guard.setActive(speakerOn || micOn);
         log("audio: speaker " + speakerOn + ", microphone " + micOn + (stream == null ? ", no stream" : ""));
         if (speakerOn && audioRenderer == null && stream != null) {
             audioRenderer = new AudioRenderer(message -> {
@@ -422,8 +454,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     static final class Settings {
         final String host, username, password, streamPath, language, microphone;
         private final String name;
-        final boolean chime, wakeScreen;
-        final long autoCloseMillis;
+        final boolean chime, wakeScreen, wakeWordRestore;
+        final long autoCloseMillis, maxCallMillis;
         final int callVolume;
 
         Settings(Map<String, Object> values) {
@@ -437,6 +469,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             chime = !Boolean.FALSE.equals(values.get("chime"));
             wakeScreen = !Boolean.FALSE.equals(values.get("wakeScreen"));
             autoCloseMillis = autoClose(string(values, "autoClose"));
+            maxCallMillis = maxCall(string(values, "maxCall"));
+            wakeWordRestore = Boolean.TRUE.equals(values.get("wakeWordRestore"));
             streamPath = string(values, "stream").startsWith("Sub") ? "/h264Preview_01_sub" : "/h264Preview_01_main";
             Object volume = values.get("callVolume");
             callVolume = volume instanceof Number ? Math.max(0, Math.min(100, ((Number) volume).intValue())) : 70;
@@ -462,6 +496,15 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 case "2 minutes": return 120_000;
                 case "5 minutes": return 300_000;
                 default: return 60_000;
+            }
+        }
+
+        private static long maxCall(String choice) {
+            switch (choice) {
+                case "Off": return 0;
+                case "5 minutes": return 300_000;
+                case "30 minutes": return 1_800_000;
+                default: return 600_000;
             }
         }
 

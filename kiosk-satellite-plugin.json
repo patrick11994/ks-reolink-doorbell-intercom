@@ -3,7 +3,7 @@
   "apiVersion": 1,
   "id": "reolink-doorbell",
   "name": "Reolink Doorbell Intercom",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "minAndroidSdk": 26,
   "minAppVersion": "2026.10.38",
   "entryClass": "io.github.patrick11994.reolinkdoorbell.ReolinkPlugin",
@@ -11,7 +11,7 @@
   "author": "patrick11994",
   "license": "Apache-2.0",
   "icon": "icon.png",
-  "capabilities": ["overlay", "host.control", "entities"],
+  "capabilities": ["overlay", "host.read", "host.control", "entities"],
   "settings": [
     {"key": "host", "type": "string", "title": "Doorbell address", "default": "", "group": "Doorbell", "description": "IP address or hostname of the doorbell on your network, for example 192.168.1.50."},
     {"key": "username", "type": "string", "title": "Username", "default": "", "group": "Doorbell", "description": "A Reolink user on the doorbell. A separate non-admin user is enough and recommended."},
@@ -22,8 +22,10 @@
     {"key": "stream", "type": "select", "title": "Video", "default": "Main (sharp)", "options": ["Main (sharp)", "Sub (light)"], "group": "Video and audio", "description": "Main is 2560x1920, sub is 640x480. Both come straight from the doorbell."},
     {"key": "callVolume", "type": "number", "title": "Call volume", "default": 70, "min": 0, "max": 100, "step": 5, "group": "Video and audio", "description": "How loud the doorbell plays on the panel. The viewer has a slider for it too."},
     {"key": "microphone", "type": "select", "title": "Microphone", "default": "Automatic", "options": ["Automatic", "Camcorder", "Voice communication", "Microphone", "Voice recognition", "Unprocessed"], "group": "Video and audio", "description": "Which Android microphone source talks to the door. Automatic takes the first that opens, Camcorder first. Pick another if the door does not hear you."},
+    {"key": "wakeWordRestore", "type": "boolean", "title": "Wake word muted by a call", "default": false, "group": "Video and audio", "description": "Managed by the plugin: brings the wake word back if a call was cut off.", "visibleWhen": {"key": "host", "equals": "__internal__"}},
     {"key": "language", "type": "select", "title": "Language", "default": "Automatic", "options": ["Automatic", "English", "Nederlands"], "group": "Video and audio", "description": "For the viewer, readings and messages. Automatic follows the panel's Android language."},
-    {"key": "autoClose", "type": "select", "title": "Close the viewer after", "default": "1 minute", "options": ["30 seconds", "1 minute", "2 minutes", "5 minutes", "Off"], "group": "Ringing", "description": "After a doorbell press, while nobody touches it; a ring around Hang up shows the time left. A touch starts it over, Speaker or Answer stop it. Opened by hand, it stays open."}
+    {"key": "autoClose", "type": "select", "title": "Close the viewer after", "default": "1 minute", "options": ["30 seconds", "1 minute", "2 minutes", "5 minutes", "Off"], "group": "Ringing", "description": "After a doorbell press, while nobody touches it; a ring around Hang up shows the time left. A touch starts it over, Speaker or Answer stop it. Opened by hand, it stays open."},
+    {"key": "maxCall", "type": "select", "title": "End a call after", "default": "10 minutes", "options": ["5 minutes", "10 minutes", "30 minutes", "Off"], "group": "Ringing", "description": "Once answered or opened by hand, so a forgotten call does not keep the room on the line."}
   ],
   "buttons": [
     {"id": "check", "title": "Check the doorbell", "label": "Check", "group": "Doorbell", "description": "Checks the address, username and password, and that button presses, video and talking all work.", "visibleWhen": {"key": "host", "notEmpty": true}}

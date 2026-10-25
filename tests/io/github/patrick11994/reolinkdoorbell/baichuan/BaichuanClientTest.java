@@ -47,6 +47,9 @@ public final class BaichuanClientTest {
         check(AlarmEvents.parse(push("MD", "people")).get(0).visitor(), false);
         check(AlarmEvents.parse(push("none", "none")).get(0).status.isEmpty(), true);
         check(AlarmEvents.parse("not xml").isEmpty(), true);
+        String doctype = "<?xml version=\"1.0\"?><!DOCTYPE body [<!ENTITY x \"visitor\">]>" + push("&x;", "none").substring(push("&x;", "none").indexOf("<body>"));
+        check(AlarmEvents.parse(doctype).isEmpty(), true);  // a DOCTYPE is refused outright
+        check(AlarmEvents.parse(push("visitor", "none").replace("<body>", "<!doctype body><body>")).isEmpty(), true);
     }
 
     static void loginSubscribeAndPush() throws Exception {

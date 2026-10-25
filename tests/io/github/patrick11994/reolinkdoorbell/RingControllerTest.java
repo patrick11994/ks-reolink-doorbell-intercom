@@ -35,6 +35,7 @@ public final class RingControllerTest {
         speakerStopsCountdown();
         manualOpenDoesNotRing();
         manualOpenNeverAutoCloses();
+        callEndsAtMaximumLength();
         pressDuringCallDoesNotRing();
         System.out.println("RingControllerTest passed");
     }
@@ -200,6 +201,36 @@ public final class RingControllerTest {
         check(r.take(), "");
         c.toggleMic();
         check(r.take(), "audio speaker=false mic=true, update IN_CALL speaker=false mic=true");
+    }
+
+    /** A forgotten call ends at the maximum length, counted from Answer, Speaker or opening by hand. */
+    static void callEndsAtMaximumLength() {
+        Recorder r = new Recorder();
+        RingController c = controller(r);
+        c.setMaxCallMillis(600_000);
+        c.onVisitor(true);
+        now += 50_000;  // ringing time does not count
+        c.answer();
+        r.take();
+        now += 599_000;
+        c.tick();
+        check(r.take(), "");
+        now += 1_000;
+        c.tick();
+        check(r.take(), "audio speaker=false mic=false, close");
+
+        c.open();  // watching by hand counts too
+        r.take();
+        now += 600_000;
+        c.tick();
+        check(r.take(), "close");
+
+        c.setMaxCallMillis(0);  // Off
+        c.open();
+        r.take();
+        now += 24 * 3_600_000L;
+        c.tick();
+        check(r.take(), "");
     }
 
     static void pressDuringCallDoesNotRing() {

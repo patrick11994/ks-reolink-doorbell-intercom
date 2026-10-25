@@ -14,6 +14,8 @@ public final class H264Depacketizer {
     }
 
     private static final byte[] START = {0, 0, 0, 1};
+    /** A 2560x1920 keyframe is about 0.3 MB; anything near this is a broken or hostile stream, so the frame is dropped. */
+    static final int MAX_UNIT = 4 * 1024 * 1024;
 
     private final Sink sink;
     private final ByteArrayOutputStream unit = new ByteArrayOutputStream(256 * 1024);
@@ -66,6 +68,11 @@ public final class H264Depacketizer {
                 fragment.write((indicator & 0xE0) | (fuHeader & 0x1F));
                 fragmenting = true;
             }
+            if (fragmenting && fragment.size() + (end - start - 2) > MAX_UNIT) {
+                fragment.reset();
+                fragmenting = false;
+                dropUnit();
+            }
             if (fragmenting) {
                 fragment.write(packet, start + 2, end - start - 2);
                 if (last) {
@@ -80,11 +87,21 @@ public final class H264Depacketizer {
     }
 
     private void nal(byte[] data, int offset, int length) {
+        if (unit.size() + START.length + length > MAX_UNIT) {
+            dropUnit();  // no marker or slice arrived to end it: a broken stream
+            return;
+        }
         int type = data[offset] & 0x1F;
         if (type == 5) keyframe = true;
         if (type >= 1 && type <= 5) picture = true;
         unit.write(START, 0, START.length);
         unit.write(data, offset, length);
+    }
+
+    private void dropUnit() {
+        unit.reset();
+        keyframe = false;
+        picture = false;
     }
 
     private void flush() {
