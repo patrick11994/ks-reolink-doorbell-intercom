@@ -26,6 +26,8 @@ import io.github.patrick11994.reolinkdoorbell.RingController.State;
 /**
  * The full-screen doorbell viewer: the live picture (a TextureView, which KS overlays support), the doorbell's name,
  * a volume slider while door audio plays (the panel has no volume buttons), and the call buttons.
+ * Portrait puts the name above the picture and the controls below it, in the space a 4:3 picture leaves. Landscape
+ * has no such space, so the controls move to a column on the right and the picture fits in the rest, uncovered.
  * Built and updated on the main thread only.
  */
 final class DoorbellView extends FrameLayout {
@@ -59,6 +61,12 @@ final class DoorbellView extends FrameLayout {
     private final TextView title;
     private final TextView speaking;
     private final LinearLayout buttons;
+    private final LinearLayout topBox, bottomBox, side;  // portrait: above and below the picture; landscape: the column
+    private final View spacer;
+    private boolean landscape;
+    private boolean arranged;
+    private int buttonDp = 76;
+    private static final int SIDE_DP = 160;
     private State state;
     private boolean speakerOn;
     private boolean micOn;
@@ -102,21 +110,13 @@ final class DoorbellView extends FrameLayout {
         video.addView(placeholder, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
         addView(video, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
 
-        LinearLayout top = new LinearLayout(context);
-        top.setOrientation(LinearLayout.VERTICAL);
-        top.setGravity(Gravity.CENTER_HORIZONTAL);
         title = new TextView(context);
         title.setGravity(Gravity.CENTER);
-        top.addView(title);
+        title.setMaxLines(2);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
         speaking = new TextView(context);
         speaking.setGravity(Gravity.CENTER);
         speaking.setVisibility(GONE);
-        top.addView(speaking);
-        LayoutParams topParams = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP);
-        addView(top, topParams);
-
-        LinearLayout bottom = new LinearLayout(context);
-        bottom.setOrientation(LinearLayout.VERTICAL);
         volumeRow = new LinearLayout(context);
         volumeRow.setOrientation(LinearLayout.HORIZONTAL);
         volumeRow.setGravity(Gravity.CENTER_VERTICAL);
@@ -138,22 +138,103 @@ final class DoorbellView extends FrameLayout {
             }
         });
         volumeRow.addView(volume, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-        bottom.addView(volumeRow, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         buttons = new LinearLayout(context);
-        buttons.setOrientation(LinearLayout.HORIZONTAL);
         buttons.setGravity(Gravity.CENTER);
-        bottom.addView(buttons, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        addView(bottom, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
+        topBox = new LinearLayout(context);
+        topBox.setOrientation(LinearLayout.VERTICAL);
+        topBox.setGravity(Gravity.CENTER_HORIZONTAL);
+        bottomBox = new LinearLayout(context);
+        bottomBox.setOrientation(LinearLayout.VERTICAL);
+        side = new LinearLayout(context);
+        side.setOrientation(LinearLayout.VERTICAL);
+        side.setGravity(Gravity.CENTER_HORIZONTAL);
+        spacer = new View(context);
 
+        arrange(false);
         applyTheme(theme);
+    }
+
+    /** Portrait or landscape follows the view's own shape, so a rotation or a KS rebuild rearranges it. */
+    @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
+        super.onSizeChanged(width, height, oldWidth, oldHeight);
+        boolean wide = width > height;
+        int size = buttonDpFor(wide, height);
+        if (wide != landscape || size != buttonDp || !arranged) {
+            buttonDp = size;
+            post(() -> {
+                arrange(wide);
+                applyPadding();
+                render();
+            });
+        }
+    }
+
+    /** Buttons shrink a little on a low landscape screen, so all three always fit in the column. */
+    private int buttonDpFor(boolean wide, int heightPx) {
+        if (!wide) return 76;
+        float density = getResources().getDisplayMetrics().density;
+        float available = heightPx / density - 54 - 48 - 64;  // the name, the column's padding, the volume slider
+        return Math.max(56, Math.min(76, Math.round(available / 3 - 36)));  // each button: circle + 16 ring + 20 label
+    }
+
+    /** Places the name, chip, slider and buttons for portrait or landscape. */
+    private void arrange(boolean wide) {
+        arranged = getWidth() > 0;
+        landscape = wide;
+        for (View piece : new View[] {title, speaking, volumeRow, buttons, spacer}) detach(piece);
+        removeView(topBox);
+        removeView(bottomBox);
+        removeView(side);
+        LayoutParams videoParams = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
+        int fill = LinearLayout.LayoutParams.MATCH_PARENT, wrap = LinearLayout.LayoutParams.WRAP_CONTENT;
+        if (wide) {
+            videoParams.rightMargin = theme.px(SIDE_DP);
+            side.addView(title, new LinearLayout.LayoutParams(fill, wrap));
+            side.addView(speaking, chipParams());
+            side.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1));
+            side.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
+            side.addView(buttons, new LinearLayout.LayoutParams(fill, wrap));
+            buttons.setOrientation(LinearLayout.VERTICAL);
+            addView(side, new LayoutParams(theme.px(SIDE_DP), LayoutParams.MATCH_PARENT, Gravity.END));
+        } else {
+            topBox.addView(title, new LinearLayout.LayoutParams(fill, wrap));
+            topBox.addView(speaking, chipParams());
+            addView(topBox, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP));
+            bottomBox.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
+            bottomBox.addView(buttons, new LinearLayout.LayoutParams(fill, wrap));
+            buttons.setOrientation(LinearLayout.HORIZONTAL);
+            addView(bottomBox, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
+        }
+        video.setLayoutParams(videoParams);
+    }
+
+    private static void detach(View view) {
+        if (view.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) view.getParent()).removeView(view);
+    }
+
+    private LinearLayout.LayoutParams chipParams() {
+        LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        chipParams.topMargin = theme.px(12);
+        chipParams.gravity = Gravity.CENTER_HORIZONTAL;
+        return chipParams;
+    }
+
+    private void applyPadding() {
+        int pad = theme.px(24);
+        if (landscape) {
+            side.setPadding(theme.px(8), pad, theme.px(8), pad);
+            buttons.setPadding(0, 0, 0, 0);
+            volumeRow.setPadding(theme.px(4), 0, theme.px(4), theme.px(16));
+        } else {
+            topBox.setPadding(pad, pad, pad, 0);
+            buttons.setPadding(pad, 0, pad, theme.px(32));
+            volumeRow.setPadding(theme.px(40), 0, theme.px(40), theme.px(20));
+        }
     }
 
     void applyTheme(KsTheme theme) {
         this.theme = theme;
-        int pad = theme.px(24);
-        ((View) title.getParent()).setPadding(pad, pad, pad, 0);
-        buttons.setPadding(pad, 0, pad, theme.px(32));
-        volumeRow.setPadding(theme.px(40), 0, theme.px(40), theme.px(20));
+        applyPadding();
         Drawable speakerIcon = icon("mdi:volume-high");
         if (speakerIcon != null) speakerIcon.setTint(Color.WHITE);
         volumeIcon.setImageDrawable(speakerIcon);
@@ -181,9 +262,6 @@ final class DoorbellView extends FrameLayout {
             speaking.setCompoundDrawables(mic, null, null, null);
             speaking.setCompoundDrawablePadding(theme.px(6));
         }
-        LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        chipParams.topMargin = theme.px(12);
-        speaking.setLayoutParams(chipParams);
         theme.styleText(placeholder, 16, 400, "onSurfaceVariant");
         placeholder.setTextColor(0xFFBDBDBD);
         if (placeholder.getText().length() == 0) placeholder.setText(texts.connecting());
@@ -276,7 +354,8 @@ final class DoorbellView extends FrameLayout {
         speaking.setVisibility(state == State.IN_CALL && micOn ? VISIBLE : GONE);
         speaking.setText(texts.microphoneActive());
         volumeRow.setVisibility(speakerOn ? VISIBLE : GONE);
-        // Every position keeps one job: left answers, then is the microphone; middle is the speaker; right hangs up.
+        // Every position keeps one job: left (top) answers, then is the microphone; middle is the speaker; right
+        // (bottom) hangs up.
         // Speaker and microphone are toggles: the same icon and label, the circle shows whether they are on.
         buttons.removeAllViews();
         if (state == State.IN_CALL) addButton("mdi:microphone", texts.microphone(), Style.TOGGLE, micOn, callback::toggleMic);
@@ -292,7 +371,7 @@ final class DoorbellView extends FrameLayout {
         LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
         column.setGravity(Gravity.CENTER_HORIZONTAL);
-        int size = theme.px(76);
+        int size = theme.px(buttonDp);
         int fill, iconColor = Color.WHITE;
         switch (style) {
             case ANSWER: fill = safeColor("success", 0xFF2E7D32); break;
@@ -333,7 +412,11 @@ final class DoorbellView extends FrameLayout {
         column.addView(caption, captionParams);
         column.setOnClickListener(v -> safely(action));
         circle.setOnClickListener(v -> safely(action));
-        buttons.addView(column, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        LinearLayout.LayoutParams place = landscape
+            ? new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            : new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        if (landscape) place.topMargin = theme.px(4);
+        buttons.addView(column, place);
     }
 
     @Override public boolean onInterceptTouchEvent(MotionEvent event) {
