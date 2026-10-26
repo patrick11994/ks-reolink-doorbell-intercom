@@ -66,7 +66,9 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Doorbell | **Username** / **Password** | A Reolink user on the doorbell. The password is stored as a masked secret. | |
 | Doorbell | **Name** | Shown at the top of the call screen. Empty shows *Front door*. | empty |
 | Doorbell | **Check the doorbell** | Tests button presses, video and talking | |
-| Ringing | **Play a chime** | A soft ding-dong at the notification volume | on |
+| Ringing | **Play a chime** | A ding-dong when the button is pressed | on |
+| Ringing | **Chime volume** | How loud the chime itself is, 5 to 100. 40 is a soft chime. | 40 |
+| Ringing | **Chime sound** | Which Android volume the chime follows: *Notifications*, *Media* or *Alarm* | Notifications |
 | Ringing | **Pause music** | *Off*, *At the ring* or *At Speaker or Answer*. Pauses the kiosk's music during a call and resumes it when the call screen closes, but only music that was playing. Opened by hand, it pauses once Speaker or Microphone is on. | Off |
 | Ringing | **Wake the screen** | Turns the screen on and closes the screensaver on a ring | on |
 | Ringing | **Close the viewer after** | 30 seconds to 5 minutes, or Off. Counts only while it rings untouched. | 1 minute |
@@ -117,6 +119,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | The door hears noise instead of your voice | Try another **Microphone sample rate**. The Logs show which source and rate a call used (*microphone: live, …*). |
 | The door hears itself (echo or a feedback loop) | Set **Microphone** to *Voice communication*, and keep **Android call mode** on |
 | Sound or the microphone stops working in a call | Turn off **Android call mode** |
+| The chime is too quiet | Raise **Chime volume**. If it is still quiet, set **Chime sound** to *Media*, the volume most tablets show, or to *Alarm*. |
 | You hear nothing with Speaker on | Raise the slider on the call screen. It sets Android's call volume, which is separate from the media volume. |
 
 ## Building
