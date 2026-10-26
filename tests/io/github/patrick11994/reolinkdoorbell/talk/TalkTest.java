@@ -31,10 +31,13 @@ public final class TalkTest {
         check(sha256(alaw), "38488f6fd710f4686360edc4d38639f96c491595ef93f8eb8d62d5e07ca6ce7b");
     }
 
-    /** 48 kHz to 8 kHz: 1 kHz speech passes almost unchanged, 6 kHz (would alias to 2 kHz) is strongly cut. */
+    /** 48 or 16 kHz to 8 kHz: 1 kHz speech passes almost unchanged, 6 kHz (would alias to 2 kHz) is strongly cut. 8 kHz passes through. */
     static void downsamplerFilters() {
-        check(peakAfter(1000) > 9000, true);
-        check(peakAfter(6000) < 1500, true);
+        for (int rate : new int[] {48000, 16000}) {
+            check(peakAfter(rate, 1000) > 9000, true);
+            check(peakAfter(rate, 6000) < 1500, true);
+        }
+        check(peakAfter(8000, 1000) > 9900, true);
         try {
             new Downsampler(44100, 8000);
             throw new AssertionError("44.1 kHz is not a multiple of 8 kHz");
@@ -43,10 +46,10 @@ public final class TalkTest {
         }
     }
 
-    private static int peakAfter(int frequency) {
-        Downsampler d = new Downsampler(48000, 8000);
-        short[] in = new short[48000], out = new short[8000];
-        for (int i = 0; i < in.length; i++) in[i] = (short) (10000 * Math.sin(2 * Math.PI * frequency * i / 48000));
+    private static int peakAfter(int rate, int frequency) {
+        Downsampler d = new Downsampler(rate, 8000);
+        short[] in = new short[rate], out = new short[8000];
+        for (int i = 0; i < in.length; i++) in[i] = (short) (10000 * Math.sin(2 * Math.PI * frequency * i / rate));
         int n = d.process(in, in.length, out, 0);
         check(n, 8000);
         int peak = 0;

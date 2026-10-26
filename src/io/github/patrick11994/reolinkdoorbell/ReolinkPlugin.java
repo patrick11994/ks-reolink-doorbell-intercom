@@ -254,7 +254,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             audioRenderer = null;
         }
         if (micOn && mic == null && backchannel != null) {
-            mic = new MicCapture(backchannel, settings.microphone, state -> {
+            mic = new MicCapture(backchannel, settings.microphone, settings.micRate, state -> {
                 log("microphone: " + state);
                 if (!state.startsWith("live")) showMessage(texts.noMicrophone());
             });
@@ -452,7 +452,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     /** The validated settings as plain fields. */
     static final class Settings {
-        final String host, username, password, streamPath, language, microphone;
+        final String host, username, password, streamPath, language, microphone, micRate;
         private final String name;
         final boolean chime, wakeScreen, wakeWordRestore;
         final long autoCloseMillis, maxCallMillis;
@@ -466,6 +466,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             language = string(values, "language");
             String mic = string(values, "microphone");
             microphone = mic.isEmpty() ? "Automatic" : mic;
+            String rate = string(values, "micRate");
+            micRate = rate.isEmpty() ? "Automatic" : rate;
             chime = !Boolean.FALSE.equals(values.get("chime"));
             wakeScreen = !Boolean.FALSE.equals(values.get("wakeScreen"));
             autoCloseMillis = autoClose(string(values, "autoClose"));
