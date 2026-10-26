@@ -46,6 +46,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private Backchannel backchannel;
     private MicCapture mic;
     private CallVolume callVolume;
+    private CallMode callMode;
     private long ringAt;
     private volatile long countdownStart, countdownMillis;  // shown by the viewer, also one created later
 
@@ -190,6 +191,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 State current = c == null ? state : c.state();
                 synchronized (ReolinkPlugin.this) {
                     if (callVolume == null) callVolume = new CallVolume(context);
+                    if (callMode == null) callMode = new CallMode(context);
                 }
                 DoorbellView created = new DoorbellView(context, theme, t, name, current, settings.callVolume, new DoorbellView.Callback() {
                     @Override public void hangUp() { RingController c = controller; if (c != null) c.hangUp(); }
@@ -241,6 +243,11 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         WakeWordGuard guard = wakeWord;
         if (guard != null) guard.setActive(speakerOn || micOn);
         log("audio: speaker " + speakerOn + ", microphone " + micOn + (stream == null ? ", no stream" : ""));
+        // Before the track and the recorder open, so both start in call mode; left again only when the call ends.
+        if ((speakerOn || micOn) && settings.callMode && callMode != null) {
+            String entered = callMode.enter();
+            if (entered != null) log("audio: " + entered);
+        }
         if (speakerOn && audioRenderer == null && stream != null) {
             audioRenderer = new AudioRenderer(message -> {
                 showMessage(message);
@@ -359,6 +366,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private synchronized void stopMedia() {
         if (stream == null && videoRenderer == null && audioRenderer == null && backchannel == null && mic == null) {
             if (callVolume != null) callVolume.restore();
+            if (callMode != null) callMode.leave();
             return;
         }
         log("media: stop (stream " + (stream != null) + ", video " + (videoRenderer != null) + ", audio " + (audioRenderer != null)
@@ -375,6 +383,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         videoOwner = null;
         audioRenderer = null;
         if (callVolume != null) callVolume.restore();
+        if (callMode != null) callMode.leave();  // here, not on the cleanup thread, so it cannot undo a next call's
         Thread cleanup = new Thread(() -> {
             try {
                 if (oldStream != null) oldStream.stop();
@@ -454,7 +463,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     static final class Settings {
         final String host, username, password, streamPath, language, microphone, micRate;
         private final String name;
-        final boolean chime, wakeScreen, wakeWordRestore;
+        final boolean chime, wakeScreen, wakeWordRestore, callMode;
         final long autoCloseMillis, maxCallMillis;
         final int callVolume;
 
@@ -473,6 +482,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             autoCloseMillis = autoClose(string(values, "autoClose"));
             maxCallMillis = maxCall(string(values, "maxCall"));
             wakeWordRestore = Boolean.TRUE.equals(values.get("wakeWordRestore"));
+            callMode = !Boolean.FALSE.equals(values.get("callMode"));
             streamPath = string(values, "stream").startsWith("Sub") ? "/h264Preview_01_sub" : "/h264Preview_01_main";
             Object volume = values.get("callVolume");
             callVolume = volume instanceof Number ? Math.max(0, Math.min(100, ((Number) volume).intValue())) : 70;

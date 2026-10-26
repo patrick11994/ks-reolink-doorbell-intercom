@@ -73,6 +73,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Video and audio | **Call volume** | How loud the doorbell plays on the panel. The slider on the call screen changes it too. | 70 |
 | Video and audio | **Microphone** | Automatic, or a fixed Android microphone source: Camcorder, Voice communication, Microphone, Voice recognition or Unprocessed | Automatic |
 | Video and audio | **Microphone sample rate** | Automatic (16000 Hz, then 48000 Hz, then 8000 Hz), or one fixed rate | Automatic |
+| Video and audio | **Android call mode** | Switches Android to call mode on the loudspeaker during a call, which most devices need for echo cancelling | on |
 | Video and audio | **Language** | Automatic (the panel's Android language), English or Nederlands | Automatic |
 
 **Actions:**
@@ -88,7 +89,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 ## Good to know
 
 - **Talking has a delay of about 2 seconds.** The doorbell itself holds about 2.1 s of incoming audio before it plays it. The Reolink app and HomeKit have the same delay, and this plugin adds less than 0.1 s to it. A red *Speaking* label reminds you while the microphone is on. In practice the conversation simply takes turns.
-- **Echo.** The doorbell's sound plays as call audio, so panels with echo suppression for calls keep your own speaker out of the microphone. If a visitor hears themselves, turn the panel's speaker down, or turn off **Speaker** while you talk.
+- **Echo.** The doorbell's sound plays as call audio, in Android's call mode on the loudspeaker, and Android's echo canceller is attached to the microphone where the device has one. That keeps the panel's own speaker out of the microphone on most devices. Echo cancelling usually works best with **Microphone** set to *Voice communication*. If a visitor hears themselves, try that, turn the panel's speaker down, or turn off **Speaker** while you talk.
 - **The wake word** pauses during a call. While the doorbell's sound plays or the microphone is on, the plugin mutes Kiosk Satellite's wake word, so the door cannot trigger the assistant, and then unmutes it afterwards. A wake word you muted yourself stays muted.
 - **Which microphone.** Panels differ in which Android microphone source really works; on an RK3576 panel only *Camcorder* does. **Automatic** uses the first source that opens, Camcorder first, and keeps it for the whole call. If the door does not hear you, pick another one under **Microphone**. If the door hears loud noise instead of you, try another **Microphone sample rate**: on an Echo Show, 48000 Hz gives noise and 16000 Hz is clean.
 
@@ -112,6 +113,8 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | The call screen stays on *Connecting to the doorbell…* | Run **Check**. Then look at Kiosk Satellite's **Logs** (in the settings or in Remote Admin). The plugin writes what failed there. |
 | The door does not hear you | Try another source under **Microphone**, and check that Kiosk Satellite has the microphone permission |
 | The door hears noise instead of your voice | Try another **Microphone sample rate**. The Logs show which source and rate a call used (*microphone: live, …*). |
+| The door hears itself (echo or a feedback loop) | Set **Microphone** to *Voice communication*, and keep **Android call mode** on |
+| Sound or the microphone stops working in a call | Turn off **Android call mode** |
 | You hear nothing with Speaker on | Raise the slider on the call screen. It sets Android's call volume, which is separate from the media volume. |
 
 ## Building

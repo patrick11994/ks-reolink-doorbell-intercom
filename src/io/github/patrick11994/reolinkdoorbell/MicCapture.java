@@ -4,6 +4,7 @@ package io.github.patrick11994.reolinkdoorbell;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
+import android.media.audiofx.AcousticEchoCanceler;
 import android.os.Build;
 import io.github.patrick11994.reolinkdoorbell.talk.Backchannel;
 import io.github.patrick11994.reolinkdoorbell.talk.Downsampler;
@@ -15,7 +16,8 @@ import io.github.patrick11994.reolinkdoorbell.talk.Downsampler;
  * is picked once per call and kept: the one from the Microphone setting, or in Automatic the first that opens,
  * CAMCORDER first. The rate comes first, because the doorbell takes 8 kHz: on an Echo Show a 48 kHz capture opens
  * fine and delivers loud noise, while 16 kHz is clean, so Automatic tries 16, then 48, then 8 kHz, and the
- * Microphone sample rate setting can fix one. Records only while the microphone is on.
+ * Microphone sample rate setting can fix one. Android's echo canceller is attached where the device has one (it
+ * mostly works on Voice communication, in call mode). Records only while the microphone is on.
  */
 final class MicCapture {
     interface Listener {
@@ -82,13 +84,22 @@ final class MicCapture {
             listener.onMicState("no microphone (" + choice + ", " + (rates.length == 1 ? rates[0] + " Hz" : "any rate") + ")");
             return;
         }
+        AcousticEchoCanceler echo = null;
+        try {
+            if (AcousticEchoCanceler.isAvailable()) {
+                echo = AcousticEchoCanceler.create(recorder.getAudioSessionId());
+                if (echo != null) echo.setEnabled(true);
+            }
+        } catch (RuntimeException unsupported) {
+            echo = null;
+        }
         try {
             recorder.startRecording();
             if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
                 listener.onMicState("the microphone is in use elsewhere");
                 return;
             }
-            listener.onMicState("live, " + opened + " " + rate + " Hz");
+            listener.onMicState("live, " + opened + " " + rate + " Hz, echo canceller " + (echo != null && echo.getEnabled() ? "on" : "none"));
             Downsampler downsampler = new Downsampler(rate, Backchannel.RATE);
             short[] chunk = new short[rate / 100];  // 10 ms
             short[] out = new short[chunk.length];
@@ -109,6 +120,7 @@ final class MicCapture {
             } catch (RuntimeException ignored) {
                 // Not started.
             }
+            if (echo != null) echo.release();
             recorder.release();
             backchannel.clear();
         }
