@@ -13,7 +13,9 @@ import io.github.patrick11994.reolinkdoorbell.talk.Downsampler;
  * on an RK3576 panel only CAMCORDER does, while MIC, VOICE_COMMUNICATION and VOICE_RECOGNITION go silent. Silence
  * cannot tell a dead source apart, because Rockchip drivers also turn a quiet room into exact zeros, so the source
  * is picked once per call and kept: the one from the Microphone setting, or in Automatic the first that opens,
- * CAMCORDER first. Records only while the microphone is on.
+ * CAMCORDER first. The rate comes first, because the doorbell takes 8 kHz: on an Echo Show a 48 kHz capture opens
+ * fine and delivers loud noise, while 16 kHz is clean, so Automatic tries 16, then 48, then 8 kHz, and the
+ * Microphone sample rate setting can fix one. Records only while the microphone is on.
  */
 final class MicCapture {
     interface Listener {
@@ -29,18 +31,22 @@ final class MicCapture {
         MediaRecorder.AudioSource.VOICE_RECOGNITION,
         Build.VERSION.SDK_INT >= 24 ? MediaRecorder.AudioSource.UNPROCESSED : MediaRecorder.AudioSource.DEFAULT,
     };
-    private static final int[] RATES = {48000, 16000};
+    /** The Microphone sample rate setting's options after Automatic, and Automatic's order. */
+    static final String[] RATE_CHOICES = {"16000 Hz", "48000 Hz", "8000 Hz"};
+    private static final int[] RATES = {16000, 48000, 8000};
 
     private final Backchannel backchannel;
     private final Listener listener;
     private final String choice;
+    private final int[] rates;
     private volatile boolean running = true;
     private final Thread thread;
 
-    /** choice is the Microphone setting: one of CHOICES, or Automatic. */
-    MicCapture(Backchannel backchannel, String choice, Listener listener) {
+    /** choice is the Microphone setting (one of CHOICES, or Automatic), rateChoice the sample rate one (one of RATE_CHOICES, or Automatic). */
+    MicCapture(Backchannel backchannel, String choice, String rateChoice, Listener listener) {
         this.backchannel = backchannel;
         this.choice = choice;
+        this.rates = rates(rateChoice);
         this.listener = listener;
         thread = new Thread(this::run, "reolink-mic");
         thread.setDaemon(true);
@@ -63,7 +69,7 @@ final class MicCapture {
         String opened = null;
         for (int i = 0; i < SOURCES.length && recorder == null; i++) {
             if (!choice.equals("Automatic") && !choice.equals(CHOICES[i])) continue;
-            for (int r : RATES) {
+            for (int r : rates) {
                 recorder = open(SOURCES[i], r);
                 if (recorder != null) {
                     rate = r;
@@ -73,7 +79,7 @@ final class MicCapture {
             }
         }
         if (recorder == null) {
-            listener.onMicState("no microphone (" + choice + ")");
+            listener.onMicState("no microphone (" + choice + ", " + (rates.length == 1 ? rates[0] + " Hz" : "any rate") + ")");
             return;
         }
         try {
@@ -106,6 +112,13 @@ final class MicCapture {
             recorder.release();
             backchannel.clear();
         }
+    }
+
+    private static int[] rates(String rateChoice) {
+        for (int i = 0; i < RATE_CHOICES.length; i++) {
+            if (RATE_CHOICES[i].equals(rateChoice)) return new int[] {RATES[i]};
+        }
+        return RATES;
     }
 
     private static AudioRecord open(int source, int rate) {
