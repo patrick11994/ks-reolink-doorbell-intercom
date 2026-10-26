@@ -38,6 +38,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private BaichuanClient events;
     private ScheduledExecutorService ticker;
     private volatile WakeWordGuard wakeWord;
+    private volatile MusicPause music;
     // The call's media, all guarded by this.
     private StreamHub stream;
     private VideoRenderer videoRenderer;
@@ -81,6 +82,18 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             }
         });
         wakeWord.restore(settings.wakeWordRestore);
+        music = new MusicPause((name, arguments, result) -> {
+            PluginHost h = ReolinkPlugin.this.host;
+            if (h == null) {
+                result.done(false, null);
+                return;
+            }
+            try {
+                h.executeCommand(name, arguments, (ok, data, error) -> result.done(ok, data));
+            } catch (RuntimeException unavailable) {
+                result.done(false, null);  // an older Kiosk Satellite, or the session ended
+            }
+        });
         ticker = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread thread = new Thread(r, "reolink-ticker");
             thread.setDaemon(true);
@@ -234,6 +247,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     @Override public void closeViewer() {
         log("viewer: close");
+        MusicPause m = music;
+        if (m != null) m.setActive(false);
         PluginHost h = host;
         if (h != null) h.hideOverlay(OVERLAY);
         stopMedia();
@@ -242,6 +257,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     @Override public synchronized void setAudio(boolean speakerOn, boolean micOn) {
         WakeWordGuard guard = wakeWord;
         if (guard != null) guard.setActive(speakerOn || micOn);
+        MusicPause m = music;
+        if (m != null && (speakerOn || micOn) && !settings.musicPause.equals("Off")) m.setActive(true);
         log("audio: speaker " + speakerOn + ", microphone " + micOn + (stream == null ? ", no stream" : ""));
         // Before the track and the recorder open, so both start in call mode; left again only when the call ends.
         if ((speakerOn || micOn) && settings.callMode && callMode != null) {
@@ -418,6 +435,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     }
 
     @Override public void ring() {
+        MusicPause m = music;
+        if (m != null && settings.musicPause.equals("At the ring")) m.setActive(true);
         if (settings.chime) Chime.play();
     }
 
@@ -461,7 +480,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     /** The validated settings as plain fields. */
     static final class Settings {
-        final String host, username, password, streamPath, language, microphone, micRate;
+        final String host, username, password, streamPath, language, microphone, micRate, musicPause;
         private final String name;
         final boolean chime, wakeScreen, wakeWordRestore, callMode;
         final long autoCloseMillis, maxCallMillis;
@@ -478,6 +497,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             String rate = string(values, "micRate");
             micRate = rate.isEmpty() ? "Automatic" : rate;
             chime = !Boolean.FALSE.equals(values.get("chime"));
+            String pause = string(values, "musicPause");
+            musicPause = pause.equals("At the ring") || pause.equals("At Speaker or Answer") ? pause : "Off";
             wakeScreen = !Boolean.FALSE.equals(values.get("wakeScreen"));
             autoCloseMillis = autoClose(string(values, "autoClose"));
             maxCallMillis = maxCall(string(values, "maxCall"));

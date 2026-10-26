@@ -20,6 +20,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
   - During a call, **Microphone** and **Speaker** turn each side on and off, and **End call** hangs up.
 - **Closes by itself** when nobody answers. A ring around **Hang up** shows the time left. A touch starts the time over, and Speaker or Answer stop it.
 - **Open it any time** to look outside. Add the **Open** action to the kiosk menu, a gesture or Home Assistant. Opened by hand, it stays open until you close it.
+- **Pauses the music** if you like: at the ring, or once you listen or talk, and resumes it afterwards.
 - **Check button** on the settings page. It tests the address, the login, video and talking, and says what to fix.
 - **English and Dutch** for the call screen and messages.
 
@@ -29,7 +30,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 |---|---|
 | **Doorbell** | A Reolink video doorbell on your local network, reachable from the panel. Tested with the **Reolink Video Doorbell PoE**, firmware v3.0.0.6460. Other Reolink doorbells that offer RTSP and ONVIF should work, but have not been tested. |
 | **On the doorbell** | **RTSP** and **ONVIF** turned on. In the Reolink app, go to Settings > Network > Advanced > Server Settings. Talking uses the ONVIF audio backchannel. The doorbell must be a *local device*, not an *account device*. |
-| **Panel** | Kiosk Satellite **2026.10.38** or newer, Android 8.0 or newer, with a microphone and a speaker. Tested on an RK3576 Android 14 panel. |
+| **Panel** | Kiosk Satellite **2026.10.41** or newer, Android 8.0 or newer, with a microphone and a speaker. Tested on an RK3576 Android 14 panel. |
 
 A doorbell that is connected through a Reolink NVR or Home Hub, rather than directly to your network, is not supported yet.
 
@@ -66,6 +67,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Doorbell | **Name** | Shown at the top of the call screen. Empty shows *Front door*. | empty |
 | Doorbell | **Check the doorbell** | Tests button presses, video and talking | |
 | Ringing | **Play a chime** | A soft ding-dong at the notification volume | on |
+| Ringing | **Pause music** | *Off*, *At the ring* or *At Speaker or Answer*. Pauses the kiosk's music during a call and resumes it when the call screen closes, but only music that was playing. Opened by hand, it pauses once Speaker or Microphone is on. | Off |
 | Ringing | **Wake the screen** | Turns the screen on and closes the screensaver on a ring | on |
 | Ringing | **Close the viewer after** | 30 seconds to 5 minutes, or Off. Counts only while it rings untouched. | 1 minute |
 | Ringing | **End a call after** | 5, 10 or 30 minutes, or Off. Counts from Answer, Speaker or opening it by hand, so a forgotten call does not keep the room on the line. | 10 minutes |
