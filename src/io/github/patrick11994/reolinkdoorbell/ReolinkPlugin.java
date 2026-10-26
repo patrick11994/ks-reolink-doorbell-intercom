@@ -437,7 +437,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     @Override public void ring() {
         MusicPause m = music;
         if (m != null && settings.musicPause.equals("At the ring")) m.setActive(true);
-        if (settings.chime) Chime.play();
+        if (settings.chime) Chime.play(settings.chimeVolume, settings.chimeStream);
     }
 
     @Override public void ringTrigger() {
@@ -480,11 +480,11 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     /** The validated settings as plain fields. */
     static final class Settings {
-        final String host, username, password, streamPath, language, microphone, micRate, musicPause;
+        final String host, username, password, streamPath, language, microphone, micRate, musicPause, chimeStream;
         private final String name;
         final boolean chime, wakeScreen, wakeWordRestore, callMode;
         final long autoCloseMillis, maxCallMillis;
-        final int callVolume;
+        final int callVolume, chimeVolume;
 
         Settings(Map<String, Object> values) {
             host = string(values, "host");
@@ -497,6 +497,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             String rate = string(values, "micRate");
             micRate = rate.isEmpty() ? "Automatic" : rate;
             chime = !Boolean.FALSE.equals(values.get("chime"));
+            Object chimeLevel = values.get("chimeVolume");
+            chimeVolume = chimeLevel instanceof Number ? Math.max(0, Math.min(100, ((Number) chimeLevel).intValue())) : 40;
+            String sound = string(values, "chimeStream");
+            chimeStream = java.util.Arrays.asList(Chime.STREAMS).contains(sound) ? sound : "Notifications";
             String pause = string(values, "musicPause");
             musicPause = pause.equals("At the ring") || pause.equals("At Speaker or Answer") ? pause : "Off";
             wakeScreen = !Boolean.FALSE.equals(values.get("wakeScreen"));
