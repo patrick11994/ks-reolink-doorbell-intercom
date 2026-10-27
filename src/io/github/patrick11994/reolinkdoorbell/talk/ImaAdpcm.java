@@ -5,6 +5,10 @@ package io.github.patrick11994.reolinkdoorbell.talk;
  * IMA ADPCM in the DVI-4 block layout Reolink's Baichuan talk takes: each block starts with a 4-byte state (the first
  * sample as little-endian int16, the step index, a zero byte), then one 4-bit code per further sample, low nibble
  * first. A block of n code bytes carries 2n + 1 samples. Keeps its state between blocks, like a stream encoder.
+ *
+ * With more than one survivor it searches a trellis: it keeps that many candidate code sequences per sample and
+ * picks the one with the least squared error at the end of the block. Choosing each code from the current sample
+ * alone (one survivor) leaves audible noise on speech; 16 survivors gain about 3 dB. Any IMA decoder plays both.
  */
 public final class ImaAdpcm {
     private static final int[] STEPS = {
@@ -16,7 +20,19 @@ public final class ImaAdpcm {
     };
     private static final int[] INDEX_CHANGE = {-1, -1, -1, -1, 2, 4, 6, 8};
 
+    private final int survivors;
     private int index;
+
+    /** The plain encoder: each code chosen from the current sample. */
+    public ImaAdpcm() {
+        this(1);
+    }
+
+    /** survivors candidate paths per sample; 1 is the plain encoder. */
+    public ImaAdpcm(int survivors) {
+        if (survivors < 1 || survivors > 1024) throw new IllegalArgumentException("survivors " + survivors);
+        this.survivors = survivors;
+    }
 
     /** Samples one block of codeBytes code bytes needs. */
     public static int samplesPerBlock(int codeBytes) {
@@ -25,6 +41,10 @@ public final class ImaAdpcm {
 
     /** Encodes samplesPerBlock(codeBytes) samples from pcm[offset] into one block of 4 + codeBytes bytes. */
     public byte[] encodeBlock(short[] pcm, int offset, int codeBytes) {
+        return survivors == 1 ? encodePlain(pcm, offset, codeBytes) : encodeTrellis(pcm, offset, codeBytes);
+    }
+
+    private byte[] encodePlain(short[] pcm, int offset, int codeBytes) {
         byte[] block = new byte[4 + codeBytes];
         int predicted = pcm[offset];
         block[0] = (byte) predicted;
@@ -38,6 +58,99 @@ public final class ImaAdpcm {
             else block[4 + i / 2] |= (byte) (code << 4);
         }
         return block;
+    }
+
+    private byte[] encodeTrellis(short[] pcm, int offset, int codeBytes) {
+        int steps = 2 * codeBytes, k = survivors;
+        ensureTrellis(steps, k);
+        int[] predicted = tPredicted, indexes = tIndexes, nextPredicted = tNextPredicted, nextIndexes = tNextIndexes;
+        long[] cost = tCost, nextCost = tNextCost;
+        int alive = 1;
+        predicted[0] = pcm[offset];
+        indexes[0] = index;
+        cost[0] = 0;
+        for (int step = 0; step < steps; step++) {
+            int sample = pcm[offset + 1 + step], n = 0;
+            for (int p = 0; p < alive; p++) {
+                // The plain encoder's code and its neighbours in size, as ffmpeg's trellis does; far codes never win.
+                int best = encode(sample, predicted[p], indexes[p]);
+                int sign = best & 8, size = best & 7;
+                for (int m = Math.max(0, size - 1); m <= Math.min(7, size + 1); m++) n = candidate(n, sign | m, p, sample, predicted, indexes, cost);
+                if (size == 0) n = candidate(n, (sign ^ 8), p, sample, predicted, indexes, cost);
+            }
+            // Keep the k cheapest, one per predicted sample, so the survivors stay different paths.
+            long[] order = tOrder;
+            for (int i = 0; i < n; i++) order[i] = tCandCost[i] << 12 | i;
+            java.util.Arrays.sort(order, 0, n);
+            int stamp = ++tStamp, kept = 0;
+            for (int i = 0; i < n && kept < k; i++) {
+                int c = (int) (order[i] & 0xFFF);
+                int slot = (tCandPredicted[c] * 0x9E3779B1 >>> 24) & (tSeen.length - 1);
+                boolean duplicate = false;
+                while (tSeenStamp[slot] == stamp) {
+                    if (tSeen[slot] == tCandPredicted[c]) { duplicate = true; break; }
+                    slot = (slot + 1) & (tSeen.length - 1);
+                }
+                if (duplicate) continue;
+                tSeenStamp[slot] = stamp;
+                tSeen[slot] = tCandPredicted[c];
+                nextPredicted[kept] = tCandPredicted[c];
+                nextIndexes[kept] = tCandIndex[c];
+                nextCost[kept] = tCandCost[c];
+                tCodes[step * k + kept] = (byte) (tCandFrom[c] & 15);
+                tParents[step * k + kept] = (short) (tCandFrom[c] >> 4);
+                kept++;
+            }
+            alive = kept;
+            int[] t = predicted; predicted = nextPredicted; nextPredicted = t;
+            t = indexes; indexes = nextIndexes; nextIndexes = t;
+            long[] u = cost; cost = nextCost; nextCost = u;
+        }
+        // The cheapest path, traced back.
+        int best = 0;
+        for (int p = 1; p < alive; p++) if (cost[p] < cost[best]) best = p;
+        byte[] block = new byte[4 + codeBytes];
+        block[0] = (byte) pcm[offset];
+        block[1] = (byte) (pcm[offset] >> 8);
+        block[2] = (byte) index;
+        index = indexes[best];
+        for (int step = steps - 1, p = best; step >= 0; step--) {
+            int code = tCodes[step * k + p];
+            if ((step & 1) == 0) block[4 + step / 2] |= (byte) code;
+            else block[4 + step / 2] |= (byte) (code << 4);
+            p = tParents[step * k + p];
+        }
+        return block;
+    }
+
+    private int candidate(int n, int code, int p, int sample, int[] predicted, int[] indexes, long[] cost) {
+        int value = decodeStep(code, predicted[p], indexes[p]);
+        long error = sample - value;
+        tCandPredicted[n] = value;
+        tCandIndex[n] = nextIndex(code, indexes[p]);
+        tCandCost[n] = cost[p] + error * error;
+        tCandFrom[n] = p << 4 | code;
+        return n + 1;
+    }
+
+    // The trellis' working arrays, kept between blocks so encoding allocates nothing per sample.
+    private int[] tPredicted, tIndexes, tNextPredicted, tNextIndexes, tCandPredicted, tCandIndex, tCandFrom, tSeen, tSeenStamp;
+    private long[] tCost, tNextCost, tCandCost, tOrder;
+    private byte[] tCodes;
+    private short[] tParents;
+    private int tStamp;
+
+    private void ensureTrellis(int steps, int k) {
+        if (tCodes != null && tCodes.length == steps * k) return;
+        int wide = k * 4;
+        tPredicted = new int[k]; tIndexes = new int[k]; tNextPredicted = new int[k]; tNextIndexes = new int[k];
+        tCost = new long[k]; tNextCost = new long[k];
+        tCandPredicted = new int[wide]; tCandIndex = new int[wide]; tCandFrom = new int[wide];
+        tCandCost = new long[wide]; tOrder = new long[wide];
+        int table = Integer.highestOneBit(wide * 2) * 2;
+        tSeen = new int[table]; tSeenStamp = new int[table];
+        tCodes = new byte[steps * k];
+        tParents = new short[steps * k];
     }
 
     /** Decodes one block, for tests: the samples it carries. */
@@ -58,6 +171,10 @@ public final class ImaAdpcm {
     }
 
     private int encode(int sample, int predicted) {
+        return encode(sample, predicted, index);
+    }
+
+    private static int encode(int sample, int predicted, int index) {
         int step = STEPS[index];
         int diff = sample - predicted;
         int code = 0;

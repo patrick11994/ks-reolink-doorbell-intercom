@@ -31,6 +31,11 @@ public final class ImaAdpcmTest {
         double snr = 10 * Math.log10(signal / noise);
         check(snr > 20, true);
 
+        // The trellis search: decodable by the same decoder, and less noise on the same audio. Two steady tones leave
+        // it little to gain (about 1.3 dB); on speech it gains 2.7 dB at 32 survivors.
+        double plain = snr(new ImaAdpcm(), pcm, codeBytes, blocks), trellis = snr(new ImaAdpcm(32), pcm, codeBytes, blocks);
+        check(trellis > plain + 1, true);
+
         // Silence stays silence.
         short[] quiet = new short[perBlock];
         short[] back = ImaAdpcm.decodeBlock(new ImaAdpcm().encodeBlock(quiet, 0, codeBytes));
@@ -38,7 +43,21 @@ public final class ImaAdpcmTest {
         for (short s : back) peak = Math.max(peak, Math.abs(s));
         check(peak <= 8, true);
 
-        System.out.println("ImaAdpcmTest passed (SNR " + Math.round(snr) + " dB)");
+        System.out.println("ImaAdpcmTest passed (SNR " + Math.round(snr) + " dB, trellis " + Math.round(trellis) + " dB)");
+    }
+
+    private static double snr(ImaAdpcm encoder, short[] pcm, int codeBytes, int blocks) {
+        int perBlock = ImaAdpcm.samplesPerBlock(codeBytes);
+        double signal = 0, noise = 0;
+        for (int b = 0; b < blocks; b++) {
+            short[] decoded = ImaAdpcm.decodeBlock(encoder.encodeBlock(pcm, b * perBlock, codeBytes));
+            for (int i = 0; i < perBlock; i++) {
+                double v = pcm[b * perBlock + i], d = decoded[i] - v;
+                signal += v * v;
+                noise += d * d;
+            }
+        }
+        return 10 * Math.log10(signal / noise);
     }
 
     private static void check(Object actual, Object expected) {
