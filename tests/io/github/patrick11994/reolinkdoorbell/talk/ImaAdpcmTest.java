@@ -36,6 +36,22 @@ public final class ImaAdpcmTest {
         double plain = snr(new ImaAdpcm(), pcm, codeBytes, blocks), trellis = snr(new ImaAdpcm(32), pcm, codeBytes, blocks);
         check(trellis > plain + 1, true);
 
+        // Header-as-state blocks: exactly 2 * codeBytes samples each, decoded back to back without a jump between them.
+        ImaAdpcm state = new ImaAdpcm(32);
+        int perState = 2 * codeBytes;
+        double sig2 = 0, err2 = 0;
+        for (int b = 0; b < blocks; b++) {
+            byte[] block = state.encodeStateBlock(pcm, b * perState, codeBytes);
+            short[] decoded = ImaAdpcm.decodeStateBlock(block);
+            check(decoded.length, perState);
+            for (int i = 0; i < perState; i++) {
+                double v = pcm[b * perState + i], d = decoded[i] - v;
+                sig2 += v * v;
+                err2 += d * d;
+            }
+        }
+        check(10 * Math.log10(sig2 / err2) > 25, true);
+
         // Silence stays silence.
         short[] quiet = new short[perBlock];
         short[] back = ImaAdpcm.decodeBlock(new ImaAdpcm().encodeBlock(quiet, 0, codeBytes));
