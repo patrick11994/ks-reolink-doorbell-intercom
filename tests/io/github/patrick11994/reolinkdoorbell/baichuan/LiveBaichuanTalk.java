@@ -23,9 +23,10 @@ import io.github.patrick11994.reolinkdoorbell.talk.ImaAdpcm;
  * "beep <pitch> Hz sent at <epoch ms>" for mac_mic_meter.py. An optional 16 kHz mono 16-bit WAV is played after the
  * beeps, to judge the sound. Ends with TalkReset. Protocol learned from neolink (AGPL-3.0); no code copied.
  *
- *     java -cp <classes> io.github.patrick11994.reolinkdoorbell.baichuan.LiveBaichuanTalk [speech.wav] [--encrypt-audio] [--ability] [--no-beeps]
+ *     java -cp <classes> io.github.patrick11994.reolinkdoorbell.baichuan.LiveBaichuanTalk [speech.wav] [--encrypt-audio] [--ability] [--no-beeps] [--survivors N]
  *
- * --ability stops after printing the TalkAbility: no sound at the door. --no-beeps plays only the WAV.
+ * --ability stops after printing the TalkAbility: no sound at the door. --no-beeps plays only the WAV. --survivors sets the
+ * ADPCM trellis (1, the default, is the plain encoder).
  */
 public final class LiveBaichuanTalk {
     static final int CMD_TALK_ABILITY = 10, CMD_TALK_RESET = 11, CMD_TALK_CONFIG = 201, CMD_TALK = 202;
@@ -51,10 +52,13 @@ public final class LiveBaichuanTalk {
         if (host == null || user == null || pass == null) throw new IllegalStateException("set REOLINK_HOST, REOLINK_USER and REOLINK_PASSWORD");
         String wav = null;
         boolean encryptAudio = false, abilityOnly = false, noBeeps = false;
-        for (String a : args) {
+        int survivors = 1;
+        for (int i = 0; i < args.length; i++) {
+            String a = args[i];
             if (a.equals("--encrypt-audio")) encryptAudio = true;
             else if (a.equals("--ability")) abilityOnly = true;
             else if (a.equals("--no-beeps")) noBeeps = true;
+            else if (a.equals("--survivors")) survivors = Integer.parseInt(args[++i]);
             else wav = a;
         }
         try (Socket socket = new Socket()) {
@@ -63,7 +67,7 @@ public final class LiveBaichuanTalk {
             socket.setSoTimeout(5000);
             LiveBaichuanTalk talk = new LiveBaichuanTalk(socket, pass);
             talk.login(user);
-            talk.run(wav, encryptAudio, abilityOnly, noBeeps);
+            talk.run(wav, encryptAudio, abilityOnly, noBeeps, survivors);
         }
     }
 
@@ -87,7 +91,7 @@ public final class LiveBaichuanTalk {
         if (answer.statusOrEncryption != 200) throw new IOException("login refused");
     }
 
-    private void run(String wav, boolean encryptAudio, boolean abilityOnly, boolean noBeeps) throws Exception {
+    private void run(String wav, boolean encryptAudio, boolean abilityOnly, boolean noBeeps, int survivors) throws Exception {
         // 1. What the doorbell can take.
         BcMessage ability = request(CMD_TALK_ABILITY, extension(false), new byte[0]);
         String abilityXml = decrypt(ability.body, ability);
@@ -140,7 +144,7 @@ public final class LiveBaichuanTalk {
         replies.setDaemon(true);
         replies.start();
 
-        ImaAdpcm encoder = new ImaAdpcm();
+        ImaAdpcm encoder = new ImaAdpcm(survivors);
         int talkId = nextId(CHANNEL);
         byte[] ext = extension(true);
         long t0 = System.nanoTime();
