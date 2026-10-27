@@ -9,13 +9,13 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import io.github.patrick11994.reolinkdoorbell.media.SpsInfo;
-import io.github.patrick11994.reolinkdoorbell.media.StreamHub;
+import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
 
 /**
  * Hardware H.264 decoding onto a Surface, tuned for delay rather than smoothness: frames go to the decoder as they
  * arrive, only the newest decoded frame is shown, and a backlog is dropped up to the next keyframe.
  */
-final class VideoRenderer implements StreamHub.VideoSink {
+final class VideoRenderer implements MediaStream.VideoSink {
     interface Listener {
         void onVideoSize(int width, int height);
         /** First frame on screen, and the decoder's average delay from input to output. */

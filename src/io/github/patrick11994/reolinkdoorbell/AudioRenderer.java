@@ -9,7 +9,7 @@ import android.media.MediaFormat;
 import java.nio.ByteBuffer;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import io.github.patrick11994.reolinkdoorbell.media.StreamHub;
+import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
 
 /**
  * The doorbell's microphone on the panel speaker: AAC decoded and played as voice-call audio, which on this panel
@@ -17,7 +17,7 @@ import io.github.patrick11994.reolinkdoorbell.media.StreamHub;
  * packets: playback starts with START_MILLIS of silence as a cushion, and audio is only skipped when more than
  * MAX_MILLIS piles up, so the delay stays bounded without gaps from ordinary network jitter.
  */
-final class AudioRenderer implements StreamHub.AudioSink {
+final class AudioRenderer implements MediaStream.AudioSink {
     interface Listener {
         void onAudioError(String message);
     }

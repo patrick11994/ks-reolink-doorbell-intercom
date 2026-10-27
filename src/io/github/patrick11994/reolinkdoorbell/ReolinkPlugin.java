@@ -20,6 +20,9 @@ import me.jxl.kiosk.plugins.PluginHost;
 import io.github.patrick11994.reolinkdoorbell.RingController.State;
 import io.github.patrick11994.reolinkdoorbell.baichuan.AlarmEvents;
 import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanClient;
+import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanStream;
+import io.github.patrick11994.reolinkdoorbell.media.FallbackStream;
+import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
 import io.github.patrick11994.reolinkdoorbell.media.StreamHub;
 import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanTalk;
 import io.github.patrick11994.reolinkdoorbell.talk.Backchannel;
@@ -43,7 +46,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private volatile WakeWordGuard wakeWord;
     private volatile MusicPause music;
     // The call's media, all guarded by this.
-    private StreamHub stream;
+    private MediaStream stream;
     private VideoRenderer videoRenderer;
     private Object videoOwner;  // the view whose surface the decoder draws on
     private AudioRenderer audioRenderer;
@@ -325,17 +328,45 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         Settings s = settings;
         if (stream != null || !s.configured()) return;
         ringAt = System.currentTimeMillis();
-        log("media: start stream " + s.streamPath);
+        log("media: start stream " + s.streamPath + " over " + (s.videoPath.equals("RTSP") ? "RTSP" : "Baichuan"));
         publishText("first_frame", texts.firstPictureReading(), texts.waiting());
-        stream = new StreamHub(s.host, 554, s.streamPath, s.username, s.password, state -> {
-            if (!state.equals("connecting") && !state.equals("streaming")) log("video: " + state);
-            if (state.startsWith("stream failed") || state.startsWith("stream ended")) showMessage(texts.noVideo(state.substring(state.indexOf(' ') + 1)));
-        });
+        stream = openStream(s);
         stream.start();
         // Talking: open the talk channel now and stream silence, so the doorbell's playout buffer is full by the time
         // anyone presses Answer (it drops audio while that buffer fills).
         talk = openTalk(s);
         talk.start();
+    }
+
+    /**
+     * The video path from the Video over setting: Baichuan (the Reolink app's way, a fresh keyframe on request), RTSP,
+     * or Automatic: Baichuan, and RTSP if Baichuan fails before the first picture.
+     */
+    private MediaStream openStream(Settings s) {
+        if (s.videoPath.equals("RTSP")) return rtspStream(s);
+        final FallbackStream[] fallback = new FallbackStream[1];
+        BaichuanStream baichuan = new BaichuanStream(s.host, 9000, s.username, s.password, s.streamPath.endsWith("_sub"), state -> {
+            if (!state.equals("connecting") && !state.equals("streaming")) log("video: " + state + " (Baichuan)");
+            FallbackStream f = fallback[0];
+            if (state.startsWith("stream failed") && f != null) {
+                // Reported on the Baichuan stream's own thread; switching stops that stream and waits for it.
+                releaseLater(() -> {
+                    if (f.primaryFailed()) log("video: falling back to RTSP");
+                });
+            } else if (state.startsWith("stream failed") || state.startsWith("stream ended")) {
+                showMessage(texts.noVideo(state.substring(state.indexOf(' ') + 1)));
+            }
+        });
+        if (s.videoPath.equals("Baichuan")) return baichuan;
+        fallback[0] = new FallbackStream(baichuan, () -> rtspStream(s));
+        return fallback[0];
+    }
+
+    private MediaStream rtspStream(Settings s) {
+        return new StreamHub(s.host, 554, s.streamPath, s.username, s.password, state -> {
+            if (!state.equals("connecting") && !state.equals("streaming")) log("video: " + state);
+            if (state.startsWith("stream failed") || state.startsWith("stream ended")) showMessage(texts.noVideo(state.substring(state.indexOf(' ') + 1)));
+        });
     }
 
     /**
@@ -423,7 +454,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             + ", talk " + (talk != null) + ", microphone " + (mic != null) + ")");
         BaichuanTalk bt = baichuanTalk;
         if (bt != null && bt.blocksSent() > 0) log(String.format(Locale.ROOT, "talk: %d Baichuan blocks sent, encoder load %.1f%%", bt.blocksSent(), 100 * bt.encodeLoad()));
-        final StreamHub oldStream = stream;
+        final MediaStream oldStream = stream;
         final VideoRenderer oldVideo = videoRenderer;
         final AudioRenderer oldAudio = audioRenderer;
         final TalkChannel oldTalk = talk;
@@ -516,7 +547,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     /** The validated settings as plain fields. */
     static final class Settings {
-        final String host, username, password, streamPath, language, microphone, micRate, musicPause, chimeStream, talkPath;
+        final String host, username, password, streamPath, language, microphone, micRate, musicPause, chimeStream, talkPath, videoPath;
         private final String name;
         final boolean chime, wakeScreen, wakeWordRestore, callMode;
         final long autoCloseMillis, maxCallMillis;
@@ -532,6 +563,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             microphone = mic.isEmpty() ? "Automatic" : mic;
             String rate = string(values, "micRate");
             micRate = rate.isEmpty() ? "Automatic" : rate;
+            String video = string(values, "videoSource");
+            videoPath = video.startsWith("Baichuan") ? "Baichuan" : video.startsWith("RTSP") ? "RTSP" : "Automatic";
             String path = string(values, "talk");
             talkPath = path.startsWith("Baichuan") ? "Baichuan" : path.startsWith("ONVIF") ? "ONVIF" : "Automatic";
             chime = !Boolean.FALSE.equals(values.get("chime"));

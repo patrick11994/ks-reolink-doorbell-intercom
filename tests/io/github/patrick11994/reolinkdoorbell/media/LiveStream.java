@@ -11,7 +11,7 @@ public final class LiveStream {
         long started = System.currentTimeMillis();
         StreamHub hub = new StreamHub(System.getenv("REOLINK_HOST"), 554, path, System.getenv("REOLINK_USER"), System.getenv("REOLINK_PASSWORD"),
             state -> System.out.println((System.currentTimeMillis() - started) + " ms: " + state));
-        hub.attachAudio(new StreamHub.AudioSink() {
+        hub.attachAudio(new MediaStream.AudioSink() {
             @Override public void onAudioFormat(byte[] config, int rate) { System.out.println("audio config " + hex(config) + " @ " + rate + " Hz"); }
             @Override public void onAudio(byte[] frame, long micros) { audio[0]++; audio[1] += frame.length; }
         });

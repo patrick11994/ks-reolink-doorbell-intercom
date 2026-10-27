@@ -189,6 +189,7 @@ public final class BaichuanClient {
         final Socket socket;
         final DataInputStream in;
         final OutputStream out;
+        boolean stopSent;  // guarded by out: a stream's stop message went out
         private final BaichuanClient client;
 
         private Login(BaichuanClient client, Socket socket, DataInputStream in) throws IOException {
