@@ -23,12 +23,13 @@ import io.github.patrick11994.reolinkdoorbell.talk.ImaAdpcm;
  * "beep <pitch> Hz sent at <epoch ms>" for mac_mic_meter.py. An optional 16 kHz mono 16-bit WAV is played after the
  * beeps, to judge the sound. Ends with TalkReset. Protocol learned from neolink (AGPL-3.0); no code copied.
  *
- *     java -cp <classes> io.github.patrick11994.reolinkdoorbell.baichuan.LiveBaichuanTalk [speech.wav] [--encrypt-audio] [--ability] [--no-beeps] [--survivors N] [--state-header] [--app-header] [--high-nibble] [--replay bodies.bin]
+ *     java -cp <classes> io.github.patrick11994.reolinkdoorbell.baichuan.LiveBaichuanTalk [speech.wav] [--encrypt-audio] [--ability] [--no-beeps] [--survivors N] [--state-header] [--app-header] [--high-nibble] [--beep-level N] [--replay bodies.bin]
  *
  * --ability stops after printing the TalkAbility: no sound at the door. --no-beeps plays only the WAV. --survivors sets the
  * ADPCM trellis (1, the default, is the plain encoder). --state-header sends 1024-sample blocks whose
  * header is the decoder state (RFC 3551 DVI4) instead of a played first sample. --app-header writes the media header the way the
  * Reolink app does (last field 2, no padding). --replay sends 528-byte media bodies captured from the app, as they are.
+ * --beep-level sets the beeps' peak (default 16000).
  * --high-nibble puts each byte's first sample in its high nibble, as the Reolink app does.
  */
 public final class LiveBaichuanTalk {
@@ -44,6 +45,7 @@ public final class LiveBaichuanTalk {
     private int counter;
     private final long started = System.currentTimeMillis();
     boolean appHeader, highNibble;
+    int beepLevel = 16000;
     String replay;
 
     private LiveBaichuanTalk(Socket socket, String password) throws IOException {
@@ -60,6 +62,7 @@ public final class LiveBaichuanTalk {
         int survivors = 1;
         boolean stateHeader = false, appHeader = false, highNibble = false;
         String replay = null;
+        int beepLevel = 16000;
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
             if (a.equals("--encrypt-audio")) encryptAudio = true;
@@ -69,6 +72,7 @@ public final class LiveBaichuanTalk {
             else if (a.equals("--state-header")) stateHeader = true;
             else if (a.equals("--app-header")) appHeader = true;
             else if (a.equals("--high-nibble")) highNibble = true;
+            else if (a.equals("--beep-level")) beepLevel = Integer.parseInt(args[++i]);
             else if (a.equals("--replay")) replay = args[++i];
             else wav = a;
         }
@@ -80,6 +84,7 @@ public final class LiveBaichuanTalk {
             talk.login(user);
             talk.appHeader = appHeader;
             talk.highNibble = highNibble;
+            talk.beepLevel = beepLevel;
             talk.replay = replay;
             talk.run(wav, encryptAudio, abilityOnly, noBeeps, survivors, stateHeader);
         }
@@ -146,7 +151,7 @@ public final class LiveBaichuanTalk {
             beepAt[p] = rate * (2 + 4 * p);
             for (int i = 0; i < rate * 3 / 10; i++) {
                 double fade = Math.min(1, Math.min(i, rate * 3 / 10 - i) / (rate * 0.01));
-                beeps[beepAt[p] + i] = (short) (16000 * fade * Math.sin(2 * Math.PI * pitches[p] * i / rate));
+                beeps[beepAt[p] + i] = (short) (beepLevel * fade * Math.sin(2 * Math.PI * pitches[p] * i / rate));
             }
         }
         short[] speech = wav == null ? new short[0] : readWav(wav, rate);
