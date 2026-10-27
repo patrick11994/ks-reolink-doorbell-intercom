@@ -27,7 +27,7 @@ public final class BaichuanTalk implements TalkChannel {
     static final int CMD_TALK_ABILITY = 10, CMD_TALK_RESET = 11, CMD_TALK_CONFIG = 201, CMD_TALK = 202;
     static final int MEDIA_ADPCM = 0x62773130, MEDIA_ADPCM_DATA = 0x0100;
     public static final int RATE = 16000;
-    static final int SURVIVORS = 32;  // the ADPCM trellis: 32 paths cost a few percent of a core and beat G.711
+    static final int SURVIVORS = 16;  // the ADPCM trellis: still above G.711 on speech, at half the cost of 32 paths
     private static final int MAX_BLOCK_CODES = 4096;  // a lengthPerEncoder beyond this is not a real doorbell
     private static final Pattern TAG = Pattern.compile("<(\\w+)>([^<]*)</\\1>");
 

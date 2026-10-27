@@ -56,7 +56,10 @@ public final class ImaAdpcm {
     }
 
     private byte[] encode(short[] pcm, int first, int codeBytes, int start) {
-        return survivors == 1 ? encodePlain(pcm, first, codeBytes, start) : encodeTrellis(pcm, first, codeBytes, start);
+        // A trellis gains nothing on silence (the talk channel's idle state), so that costs no more than the plain encoder.
+        boolean silent = start == 0;
+        for (int i = 0; silent && i < 2 * codeBytes; i++) silent = pcm[first + i] == 0;
+        return survivors == 1 || silent ? encodePlain(pcm, first, codeBytes, start) : encodeTrellis(pcm, first, codeBytes, start);
     }
 
     private byte[] encodePlain(short[] pcm, int first, int codeBytes, int start) {
