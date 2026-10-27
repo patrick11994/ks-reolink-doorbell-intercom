@@ -3,7 +3,7 @@
   "apiVersion": 1,
   "id": "reolink-doorbell",
   "name": "Reolink Doorbell Intercom",
-  "version": "1.7.0-beta.1",
+  "version": "1.7.0",
   "minAndroidSdk": 26,
   "minAppVersion": "2026.10.41",
   "entryClass": "io.github.patrick11994.reolinkdoorbell.ReolinkPlugin",

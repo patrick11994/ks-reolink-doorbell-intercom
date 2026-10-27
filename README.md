@@ -13,7 +13,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 ## Features
 
 - **Rings at once.** The plugin keeps a connection open to the doorbell, so a press reaches the panel without delay. It wakes the screen, closes the screensaver, plays a soft chime and opens a full-screen call screen. Only the button rings: motion and person detection never do.
-- **Live video.** H.264 straight from the doorbell, decoded in hardware. The first picture shows about 0.5 to 1.5 s after the press.
+- **Live video.** H.264 straight from the doorbell, decoded in hardware. The plugin asks for the picture the way the Reolink app does, and the doorbell answers with a fresh keyframe at once: on a wall panel the first picture shows about 0.4 s after the press.
 - **Listen, then answer.**
   - **Speaker** plays the sound at the door, with a volume slider on screen, since most panels have no volume buttons.
   - **Answer** opens the microphone so you can talk to the door. Your voice reaches the door in about 1 second, the same way the Reolink app talks.
@@ -29,7 +29,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 | | |
 |---|---|
 | **Doorbell** | A Reolink video doorbell on your local network, reachable from the panel. Tested with the **Reolink Video Doorbell PoE**, firmware v3.0.0.6460. Other Reolink doorbells that offer RTSP should work, but have not been tested. |
-| **On the doorbell** | **RTSP** turned on, and preferably **ONVIF** too. In the Reolink app, go to Settings > Network > Advanced > Server Settings. Talking goes over Reolink's own protocol (Baichuan, port 9000); ONVIF is the fallback for doorbells that refuse that. The doorbell must be a *local device*, not an *account device*. |
+| **On the doorbell** | **RTSP** turned on, and preferably **ONVIF** too. In the Reolink app, go to Settings > Network > Advanced > Server Settings. Video and talking go over Reolink's own protocol (Baichuan, port 9000); RTSP and ONVIF are the fallbacks for doorbells that refuse that, and the **Check** button uses RTSP. The doorbell must be a *local device*, not an *account device*. |
 | **Panel** | Kiosk Satellite **2026.10.41** or newer, Android 8.0 or newer, with a microphone and a speaker. Tested on an RK3576 Android 14 panel. |
 
 A doorbell that is connected through a Reolink NVR or Home Hub, rather than directly to your network, is not supported yet.
@@ -73,6 +73,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Ringing | **Wake the screen** | Turns the screen on and closes the screensaver on a ring | on |
 | Ringing | **Close the viewer after** | 30 seconds to 5 minutes, or Off. Counts only while it rings untouched. | 1 minute |
 | Ringing | **End a call after** | 5, 10 or 30 minutes, or Off. Counts from Answer, Speaker or opening it by hand, so a forgotten call does not keep the room on the line. | 10 minutes |
+| Video and audio | **Video over** | *Automatic* (Baichuan, and RTSP if Baichuan fails before the first picture), *Baichuan* or *RTSP* | Automatic |
 | Video and audio | **Video** | *Main* (2560×1920, sharp) or *Sub* (640×480, light) | Main |
 | Video and audio | **Call volume** | How loud the doorbell plays on the panel. The slider on the call screen changes it too. | 70 |
 | Video and audio | **Microphone** | Automatic, or a fixed Android microphone source: Camcorder, Voice communication, Microphone, Voice recognition or Unprocessed | Automatic |
@@ -100,7 +101,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 
 ## Privacy and security
 
-- **Nothing leaves your network.** The plugin connects only to the doorbell, on two ports: 9000 (button presses and talking) and 554 (RTSP video and sound, and the ONVIF audio backchannel when talking falls back to it). It has no analytics, and it contacts no other service.
+- **Nothing leaves your network.** The plugin connects only to the doorbell, on two ports: 9000 (button presses, video and sound, and talking) and 554 (RTSP and the ONVIF audio backchannel, when the plugin falls back to them, and for the Check button). It has no analytics, and it contacts no other service.
 - **The doorbell password** is stored as a Kiosk Satellite secret setting. Plugin Manager and Remote Admin mask it. Use a separate, non-admin Reolink user for the panel.
 - **The connections are not encrypted.** Reolink's local protocols are not, so keep the doorbell and the panel on a trusted network.
 - **The microphone** is only on while the call screen shows **Microphone** as on, and every call ends after **End a call after**. Nothing is recorded or stored.
@@ -114,6 +115,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | **Check** says it cannot reach the doorbell | The address, and that the panel and the doorbell are on the same network |
 | **Check** says the username or password is refused | Try the same user in the Reolink app |
 | **Check** says video does not work | Turn on RTSP in the Reolink app's Server Settings |
+| The picture takes about a second to show | The plugin fell back to RTSP. The Logs say so (*video: falling back to RTSP*). |
 | **Check** says there is no talk channel | Turn on ONVIF in the Reolink app's Server Settings |
 | The door hears you about 2 seconds late | The doorbell refused Baichuan talk and the plugin fell back to ONVIF. The Logs say so (*talk: falling back to the ONVIF backchannel*). |
 | The call screen stays on *Connecting to the doorbell…* | Run **Check**. Then look at Kiosk Satellite's **Logs** (in the settings or in Remote Admin). The plugin writes what failed there. |
