@@ -164,13 +164,50 @@ public final class BaichuanClient {
      * a wrong address, a refused login or an account device.
      */
     public static void verify(String host, int port, String username, String password) throws IOException {
+        login(host, port, username, password, 5_000).close();
+    }
+
+    /** A logged-in session for other work than events, such as talking. The caller owns and closes it. */
+    static Login login(String host, int port, String username, String password, int timeoutMillis) throws IOException {
         BaichuanClient client = new BaichuanClient(host, port, username, password, new Listener() {
             @Override public void onConnection(boolean connected, String detail) {}
             @Override public void onAlarm(AlarmEvents.Event event) {}
-        });
-        try (Socket s = new Socket()) {
+        }, 25_000, timeoutMillis);
+        Socket s = new Socket();
+        try {
             DataInputStream in = client.connect(s);
             client.login(in, s.getOutputStream());
+            return new Login(client, s, in);
+        } catch (IOException | RuntimeException error) {
+            s.close();
+            throw error;
+        }
+    }
+
+    /** One logged-in Baichuan session: its socket, its AES key and its message ids. */
+    static final class Login implements java.io.Closeable {
+        final Socket socket;
+        final DataInputStream in;
+        final OutputStream out;
+        private final BaichuanClient client;
+
+        private Login(BaichuanClient client, Socket socket, DataInputStream in) throws IOException {
+            this.client = client;
+            this.socket = socket;
+            this.in = in;
+            this.out = socket.getOutputStream();
+        }
+
+        byte[] aesKey() {
+            return client.aesKey;
+        }
+
+        synchronized int nextId(int channel) {
+            return client.nextId(channel);
+        }
+
+        @Override public void close() throws IOException {
+            socket.close();
         }
     }
 

@@ -8,12 +8,14 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.util.Collections;
 import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanClient;
+import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanTalk;
 import io.github.patrick11994.reolinkdoorbell.media.RtspSession;
 import io.github.patrick11994.reolinkdoorbell.media.Sdp;
 
 /**
  * The settings page's Check button: the three things a call needs, in order, each with a message a person can act
- * on. Button presses (a Baichuan login on 9000), video (RTSP on 554) and talking (the ONVIF backchannel track).
+ * on. Button presses (a Baichuan login on 9000), video (RTSP on 554) and talking (Baichuan talk on 9000, or else the
+ * ONVIF backchannel track).
  */
 final class ConnectionCheck {
     static final class Result {
@@ -38,17 +40,27 @@ final class ConnectionCheck {
         } catch (IOException error) {
             return new Result(false, unreachable(error) ? texts.checkUnreachable(host) : texts.checkFailed(describe(error)));
         }
+        boolean onvifTalk;
         RtspSession rtsp = new RtspSession(host, rtspPort, "/h264Preview_01_main", username, password);
         try {
             Sdp sdp = rtsp.describe(Collections.singletonMap("Require", "www.onvif.org/ver20/backchannel"));
             if (sdp.receive("video") == null) return new Result(false, texts.checkNoVideo());
-            if (sdp.backchannel() == null) return new Result(false, texts.checkNoTalk());
+            onvifTalk = sdp.backchannel() != null;
         } catch (IOException error) {
             return new Result(false, texts.checkNoVideo());
         } finally {
             rtsp.close();
         }
+        if (!onvifTalk && !baichuanTalk(host, baichuanPort, username, password)) return new Result(false, texts.checkNoTalk());
         return new Result(true, texts.checkOk());
+    }
+
+    private static boolean baichuanTalk(String host, int port, String username, String password) {
+        try {
+            return BaichuanTalk.probe(host, port, username, password) != null;
+        } catch (IOException error) {
+            return false;
+        }
     }
 
     private static boolean unreachable(IOException error) {

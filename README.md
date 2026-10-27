@@ -16,7 +16,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 - **Live video.** H.264 straight from the doorbell, decoded in hardware. The first picture shows about 0.5 to 1.5 s after the press.
 - **Listen, then answer.**
   - **Speaker** plays the sound at the door, with a volume slider on screen, since most panels have no volume buttons.
-  - **Answer** opens the microphone so you can talk to the door.
+  - **Answer** opens the microphone so you can talk to the door. Your voice reaches the door in about 1 second, the same way the Reolink app talks.
   - During a call, **Microphone** and **Speaker** turn each side on and off, and **End call** hangs up.
 - **Closes by itself** when nobody answers. A ring around **Hang up** shows the time left. A touch starts the time over, and Speaker or Answer stop it.
 - **Open it any time** to look outside. Add the **Open** action to the kiosk menu, a gesture or Home Assistant. Opened by hand, it stays open until you close it.
@@ -28,8 +28,8 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 
 | | |
 |---|---|
-| **Doorbell** | A Reolink video doorbell on your local network, reachable from the panel. Tested with the **Reolink Video Doorbell PoE**, firmware v3.0.0.6460. Other Reolink doorbells that offer RTSP and ONVIF should work, but have not been tested. |
-| **On the doorbell** | **RTSP** and **ONVIF** turned on. In the Reolink app, go to Settings > Network > Advanced > Server Settings. Talking uses the ONVIF audio backchannel. The doorbell must be a *local device*, not an *account device*. |
+| **Doorbell** | A Reolink video doorbell on your local network, reachable from the panel. Tested with the **Reolink Video Doorbell PoE**, firmware v3.0.0.6460. Other Reolink doorbells that offer RTSP should work, but have not been tested. |
+| **On the doorbell** | **RTSP** turned on, and preferably **ONVIF** too. In the Reolink app, go to Settings > Network > Advanced > Server Settings. Talking goes over Reolink's own protocol (Baichuan, port 9000); ONVIF is the fallback for doorbells that refuse that. The doorbell must be a *local device*, not an *account device*. |
 | **Panel** | Kiosk Satellite **2026.10.41** or newer, Android 8.0 or newer, with a microphone and a speaker. Tested on an RK3576 Android 14 panel. |
 
 A doorbell that is connected through a Reolink NVR or Home Hub, rather than directly to your network, is not supported yet.
@@ -76,6 +76,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Video and audio | **Video** | *Main* (2560×1920, sharp) or *Sub* (640×480, light) | Main |
 | Video and audio | **Call volume** | How loud the doorbell plays on the panel. The slider on the call screen changes it too. | 70 |
 | Video and audio | **Microphone** | Automatic, or a fixed Android microphone source: Camcorder, Voice communication, Microphone, Voice recognition or Unprocessed | Automatic |
+| Video and audio | **Talk over** | *Automatic* (Baichuan, and ONVIF if the doorbell refuses it), *Baichuan* (about 1 s to the door, 16 kHz) or *ONVIF* (about 2 s, 8 kHz) | Automatic |
 | Video and audio | **Microphone sample rate** | Automatic (16000 Hz, then 48000 Hz, then 8000 Hz), or one fixed rate | Automatic |
 | Video and audio | **Android call mode** | Switches Android to call mode on the loudspeaker during a call, which most devices need for echo cancelling | on |
 | Video and audio | **Language** | Automatic (the panel's Android language), English or Nederlands | Automatic |
@@ -92,14 +93,14 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 
 ## Good to know
 
-- **Talking has a delay of about 2 seconds.** The doorbell itself holds about 2.1 s of incoming audio before it plays it. The Reolink app and HomeKit have the same delay, and this plugin adds less than 0.1 s to it. A red *Speaking* label reminds you while the microphone is on. In practice the conversation simply takes turns.
+- **Talking has a delay of about 1 second.** The plugin talks the way the Reolink app does, over Reolink's own protocol, in 16 kHz audio: measured at the door, your voice arrives 1.05 s after the panel sends it. Over the ONVIF backchannel (the **Talk over** setting, or the fallback) the doorbell itself holds about 2.1 s of audio before it plays it, and the sound is 8 kHz telephone quality. A *Microphone active* label reminds you while the microphone is on.
 - **Echo.** The doorbell's sound plays as call audio, in Android's call mode on the loudspeaker, and Android's echo canceller is attached to the microphone where the device has one. That keeps the panel's own speaker out of the microphone on most devices. Echo cancelling usually works best with **Microphone** set to *Voice communication*. If a visitor hears themselves, try that, turn the panel's speaker down, or turn off **Speaker** while you talk.
 - **The wake word** pauses during a call. While the doorbell's sound plays or the microphone is on, the plugin mutes Kiosk Satellite's wake word, so the door cannot trigger the assistant, and then unmutes it afterwards. A wake word you muted yourself stays muted.
 - **Which microphone.** Panels differ in which Android microphone source really works; on an RK3576 panel only *Camcorder* does. **Automatic** uses the first source that opens, Camcorder first, and keeps it for the whole call. If the door does not hear you, pick another one under **Microphone**. If the door hears loud noise instead of you, try another **Microphone sample rate**: on an Echo Show, 48000 Hz gives noise and 16000 Hz is clean.
 
 ## Privacy and security
 
-- **Nothing leaves your network.** The plugin connects only to the doorbell, on two ports: 9000 (button presses) and 554 (RTSP video and sound, and the ONVIF audio backchannel for talking). It has no analytics, and it contacts no other service.
+- **Nothing leaves your network.** The plugin connects only to the doorbell, on two ports: 9000 (button presses and talking) and 554 (RTSP video and sound, and the ONVIF audio backchannel when talking falls back to it). It has no analytics, and it contacts no other service.
 - **The doorbell password** is stored as a Kiosk Satellite secret setting. Plugin Manager and Remote Admin mask it. Use a separate, non-admin Reolink user for the panel.
 - **The connections are not encrypted.** Reolink's local protocols are not, so keep the doorbell and the panel on a trusted network.
 - **The microphone** is only on while the call screen shows **Microphone** as on, and every call ends after **End a call after**. Nothing is recorded or stored.
@@ -114,6 +115,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | **Check** says the username or password is refused | Try the same user in the Reolink app |
 | **Check** says video does not work | Turn on RTSP in the Reolink app's Server Settings |
 | **Check** says there is no talk channel | Turn on ONVIF in the Reolink app's Server Settings |
+| The door hears you about 2 seconds late | The doorbell refused Baichuan talk and the plugin fell back to ONVIF. The Logs say so (*talk: falling back to the ONVIF backchannel*). |
 | The call screen stays on *Connecting to the doorbell…* | Run **Check**. Then look at Kiosk Satellite's **Logs** (in the settings or in Remote Admin). The plugin writes what failed there. |
 | The door does not hear you | Try another source under **Microphone**, and check that Kiosk Satellite has the microphone permission |
 | The door hears noise instead of your voice | Try another **Microphone sample rate**. The Logs show which source and rate a call used (*microphone: live, …*). |
@@ -137,6 +139,7 @@ To test a local build, install the ZIP through **Plugin Manager > Developer Tool
 
 - Plugin SDK, template and build tools: [Kiosk Satellite plugin template](https://github.com/jxlarrea/kiosk-satellite-plugins) (Apache-2.0)
 - Reolink's Baichuan protocol, for the button presses, was learned from [reolink_aio](https://github.com/starkillerOG/reolink_aio) (MIT). The plugin reimplements it and copies no code.
+- Talking over Baichuan was first learned from [neolink](https://github.com/QuantumEntangledAndy/neolink) (AGPL-3.0); the exact audio format the doorbell wants was then checked against the Reolink app's own traffic. No code was copied.
 - Talking over the ONVIF audio backchannel follows the approach of [Scrypted](https://github.com/koush/scrypted)'s Reolink and ONVIF plugins. No code was copied.
 - The interface follows ideas from [UniFi Protect Doorbell](https://github.com/mark-andrew/kiosk-satellite-unifi-doorbell) and [Kiosk Phone](https://github.com/mpjanofsky/kiosk-phone).
 

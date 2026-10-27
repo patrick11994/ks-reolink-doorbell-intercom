@@ -21,7 +21,10 @@ import io.github.patrick11994.reolinkdoorbell.RingController.State;
 import io.github.patrick11994.reolinkdoorbell.baichuan.AlarmEvents;
 import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanClient;
 import io.github.patrick11994.reolinkdoorbell.media.StreamHub;
+import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanTalk;
 import io.github.patrick11994.reolinkdoorbell.talk.Backchannel;
+import io.github.patrick11994.reolinkdoorbell.talk.FallbackTalk;
+import io.github.patrick11994.reolinkdoorbell.talk.TalkChannel;
 
 /**
  * Reolink doorbell for Kiosk Satellite: holds a Baichuan session to the doorbell, and on a button press wakes the
@@ -44,7 +47,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private VideoRenderer videoRenderer;
     private Object videoOwner;  // the view whose surface the decoder draws on
     private AudioRenderer audioRenderer;
-    private Backchannel backchannel;
+    private TalkChannel talk;
+    private BaichuanTalk baichuanTalk;  // the Baichuan part of talk, for its encoder load
     private MicCapture mic;
     private CallVolume callVolume;
     private CallMode callMode;
@@ -277,15 +281,15 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             releaseLater(audioRenderer::release);
             audioRenderer = null;
         }
-        if (micOn && mic == null && backchannel != null) {
-            mic = new MicCapture(backchannel, settings.microphone, settings.micRate, state -> {
+        if (micOn && mic == null && talk != null) {
+            mic = new MicCapture(talk, settings.microphone, settings.micRate, state -> {
                 log("microphone: " + state);
                 if (!state.startsWith("live")) showMessage(texts.noMicrophone());
             });
         } else if (!micOn && mic != null) {
             releaseLater(mic::release);
             mic = null;
-            if (backchannel != null) backchannel.clear();
+            if (talk != null) talk.clear();
         }
     }
 
@@ -328,13 +332,42 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             if (state.startsWith("stream failed") || state.startsWith("stream ended")) showMessage(texts.noVideo(state.substring(state.indexOf(' ') + 1)));
         });
         stream.start();
-        // Talking: open the backchannel now and stream silence, so the doorbell's ~2 s buffer is full by the time
+        // Talking: open the talk channel now and stream silence, so the doorbell's playout buffer is full by the time
         // anyone presses Answer (it drops audio while that buffer fills).
-        backchannel = new Backchannel(s.host, 554, s.streamPath, s.username, s.password, state -> {
+        talk = openTalk(s);
+        talk.start();
+    }
+
+    /**
+     * The talk path from the Talk setting: Baichuan (about 1 s to the door, 16 kHz), the ONVIF backchannel (about
+     * 2 s, 8 kHz, for doorbells that do not talk over Baichuan), or Automatic: Baichuan, and ONVIF if it is refused.
+     */
+    private TalkChannel openTalk(Settings s) {
+        baichuanTalk = null;
+        if (s.talkPath.equals("ONVIF")) return onvifTalk(s);
+        final FallbackTalk[] fallback = new FallbackTalk[1];
+        BaichuanTalk baichuan = new BaichuanTalk(s.host, 9000, s.username, s.password, state -> {
             if (!state.equals("connecting") && !state.equals("open")) log("talk: " + state);
+            else if (state.equals("open")) log("talk: open over Baichuan");
+            if (state.startsWith("talk refused") && fallback[0] != null) {
+                log("talk: falling back to the ONVIF backchannel");
+                fallback[0].primaryRefused();
+            } else if (state.startsWith("talk refused") || state.startsWith("talk failed")) {
+                showMessage(state);
+            }
+        });
+        baichuanTalk = baichuan;
+        if (s.talkPath.equals("Baichuan")) return baichuan;
+        fallback[0] = new FallbackTalk(baichuan, () -> onvifTalk(s));
+        return fallback[0];
+    }
+
+    private TalkChannel onvifTalk(Settings s) {
+        return new Backchannel(s.host, 554, s.streamPath, s.username, s.password, state -> {
+            if (!state.equals("connecting") && !state.equals("open")) log("talk: " + state);
+            else if (state.equals("open")) log("talk: open over ONVIF");
             if (state.startsWith("talk failed")) showMessage(state);
         });
-        backchannel.start();
     }
 
     /**
@@ -381,19 +414,22 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
      * Android refuses network traffic (the RTSP TEARDOWN) and where waiting for a decoder to stop would stall the UI.
      */
     private synchronized void stopMedia() {
-        if (stream == null && videoRenderer == null && audioRenderer == null && backchannel == null && mic == null) {
+        if (stream == null && videoRenderer == null && audioRenderer == null && talk == null && mic == null) {
             if (callVolume != null) callVolume.restore();
             if (callMode != null) callMode.leave();
             return;
         }
         log("media: stop (stream " + (stream != null) + ", video " + (videoRenderer != null) + ", audio " + (audioRenderer != null)
-            + ", talk " + (backchannel != null) + ", microphone " + (mic != null) + ")");
+            + ", talk " + (talk != null) + ", microphone " + (mic != null) + ")");
+        BaichuanTalk bt = baichuanTalk;
+        if (bt != null && bt.blocksSent() > 0) log(String.format(Locale.ROOT, "talk: %d Baichuan blocks sent, encoder load %.1f%%", bt.blocksSent(), 100 * bt.encodeLoad()));
         final StreamHub oldStream = stream;
         final VideoRenderer oldVideo = videoRenderer;
         final AudioRenderer oldAudio = audioRenderer;
-        final Backchannel oldTalk = backchannel;
+        final TalkChannel oldTalk = talk;
         final MicCapture oldMic = mic;
-        backchannel = null;
+        talk = null;
+        baichuanTalk = null;
         mic = null;
         stream = null;
         videoRenderer = null;
@@ -480,7 +516,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     /** The validated settings as plain fields. */
     static final class Settings {
-        final String host, username, password, streamPath, language, microphone, micRate, musicPause, chimeStream;
+        final String host, username, password, streamPath, language, microphone, micRate, musicPause, chimeStream, talkPath;
         private final String name;
         final boolean chime, wakeScreen, wakeWordRestore, callMode;
         final long autoCloseMillis, maxCallMillis;
@@ -496,6 +532,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             microphone = mic.isEmpty() ? "Automatic" : mic;
             String rate = string(values, "micRate");
             micRate = rate.isEmpty() ? "Automatic" : rate;
+            String path = string(values, "talk");
+            talkPath = path.startsWith("Baichuan") ? "Baichuan" : path.startsWith("ONVIF") ? "ONVIF" : "Automatic";
             chime = !Boolean.FALSE.equals(values.get("chime"));
             Object chimeLevel = values.get("chimeVolume");
             chimeVolume = chimeLevel instanceof Number ? Math.max(0, Math.min(100, ((Number) chimeLevel).intValue())) : 40;

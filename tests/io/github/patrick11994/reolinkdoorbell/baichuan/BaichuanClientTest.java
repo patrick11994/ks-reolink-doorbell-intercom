@@ -4,6 +4,7 @@ package io.github.patrick11994.reolinkdoorbell.baichuan;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
@@ -116,23 +117,10 @@ public final class BaichuanClientTest {
             socket.setSoTimeout(3000);
             DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
             OutputStream out = socket.getOutputStream();
-            BcMessage nonceRequest = BcMessage.read(in);
-            String nonceXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<Encryption version=\"1.1\">\n<type>md5</type>\n<nonce>" + NONCE + "</nonce>\n</Encryption>\n</body>\n";
-            out.write(reply20(1, nonceRequest.messageId, 0xdd12, BcCrypto.xor(nonceXml.getBytes(StandardCharsets.UTF_8), nonceRequest.channelByte())));
-            BcMessage login = BcMessage.read(in);
-            String loginXml = new String(BcCrypto.xor(login.body, login.channelByte()), StandardCharsets.UTF_8);
-            Matcher user = Pattern.compile("<userName>([^<]+)</userName>").matcher(loginXml);
-            Matcher pass = Pattern.compile("<password>([^<]+)</password>").matcher(loginXml);
-            boolean ok = user.find() && pass.find() && user.group(1).equals(BcCrypto.md5Modern(USER + NONCE)) && pass.group(1).equals(BcCrypto.md5Modern(realPassword + NONCE));
-            if (!ok) {
-                out.write(reply24(1, login.messageId, 401, new byte[0]));
-                return;
-            }
-            log.add("login ok");
-            out.write(reply24(1, login.messageId, 200, BcCrypto.xor("<body><DeviceInfo/></body>".getBytes(StandardCharsets.UTF_8), login.channelByte())));
+            byte[] key = fakeLogin(in, out, realPassword, log);
+            if (key == null) return;
             BcMessage subscribe = BcMessage.read(in);
             if (subscribe.command == BaichuanClient.CMD_SUBSCRIBE) out.write(reply24(31, subscribe.messageId, 400, new byte[0]));
-            byte[] key = BcCrypto.aesKey(NONCE, realPassword);
             out.write(reply24(33, 0, 200, BcCrypto.aes(key, push("none", "none").getBytes(StandardCharsets.UTF_8), true)));
             out.write(reply24(33, 0, 200, BcCrypto.aes(key, push("visitor", "none").getBytes(StandardCharsets.UTF_8), true)));
             out.flush();
@@ -146,12 +134,34 @@ public final class BaichuanClientTest {
         }
     }
 
+    /** The doorbell's side of the nonce and the login; returns the session's AES key, or null after refusing it. */
+    static byte[] fakeLogin(DataInputStream in, OutputStream out, String realPassword, List<String> log) throws IOException {
+        {
+            BcMessage nonceRequest = BcMessage.read(in);
+            String nonceXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<Encryption version=\"1.1\">\n<type>md5</type>\n<nonce>" + NONCE + "</nonce>\n</Encryption>\n</body>\n";
+            out.write(reply20(1, nonceRequest.messageId, 0xdd12, BcCrypto.xor(nonceXml.getBytes(StandardCharsets.UTF_8), nonceRequest.channelByte())));
+            BcMessage login = BcMessage.read(in);
+            String loginXml = new String(BcCrypto.xor(login.body, login.channelByte()), StandardCharsets.UTF_8);
+            Matcher user = Pattern.compile("<userName>([^<]+)</userName>").matcher(loginXml);
+            Matcher pass = Pattern.compile("<password>([^<]+)</password>").matcher(loginXml);
+            boolean ok = user.find() && pass.find() && user.group(1).equals(BcCrypto.md5Modern(USER + NONCE)) && pass.group(1).equals(BcCrypto.md5Modern(realPassword + NONCE));
+            if (!ok) {
+                out.write(reply24(1, login.messageId, 401, new byte[0]));
+                return null;
+            }
+            log.add("login ok");
+            out.write(reply24(1, login.messageId, 200, BcCrypto.xor("<body><DeviceInfo/></body>".getBytes(StandardCharsets.UTF_8), login.channelByte())));
+            out.flush();
+            return BcCrypto.aesKey(NONCE, realPassword);
+        }
+    }
+
     static String push(String status, String ai) {
         return "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<AlarmEventList version=\"1.1\">\n<AlarmEvent version=\"1.1\">\n<channelId>0</channelId>\n<status>"
             + status + "</status>\n<AItype>" + ai + "</AItype>\n<recording>0</recording>\n<timeStamp>0</timeStamp>\n</AlarmEvent>\n</AlarmEventList>\n</body>\n";
     }
 
-    private static byte[] reply24(int command, int id, int status, byte[] body) {
+    static byte[] reply24(int command, int id, int status, byte[] body) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         int[] ints = {BcMessage.MAGIC, command, body.length, id};
         for (int v : ints) le(out, v, 4);

@@ -2,9 +2,10 @@
 package io.github.patrick11994.reolinkdoorbell.talk;
 
 /**
- * IMA ADPCM in the DVI-4 block layout Reolink's Baichuan talk takes: each block starts with a 4-byte state (the first
- * sample as little-endian int16, the step index, a zero byte), then one 4-bit code per further sample, low nibble
- * first. A block of n code bytes carries 2n + 1 samples. Keeps its state between blocks, like a stream encoder.
+ * IMA ADPCM blocks as Reolink's Baichuan talk takes them: each block starts with a 4-byte header (the block's first
+ * sample as little-endian int16, the step index, a zero byte), then one 4-bit code per further sample. A block of n
+ * code bytes carries 2n + 1 samples. encodeBlock writes the WAV nibble order (low nibble first); the doorbell wants
+ * the high nibble first, see highNibbleFirst. Keeps the step index between blocks, like a stream encoder.
  *
  * With more than one survivor it searches a trellis: it keeps that many candidate code sequences per sample and
  * picks the one with the least squared error at the end of the block. Choosing each code from the current sample
@@ -22,7 +23,6 @@ public final class ImaAdpcm {
 
     private final int survivors;
     private int index;
-    private int predictor;  // the decoder's value after the last block, for header-as-state blocks
 
     /** The plain encoder: each code chosen from the current sample. */
     public ImaAdpcm() {
@@ -40,21 +40,19 @@ public final class ImaAdpcm {
         return 2 * codeBytes + 1;
     }
 
-    /**
-     * Encodes samplesPerBlock(codeBytes) samples from pcm[offset] into one block of 4 + codeBytes bytes, the WAV way:
-     * the header's sample is the block's first sample, and is played.
-     */
+    /** Encodes samplesPerBlock(codeBytes) samples from pcm[offset] into one block of 4 + codeBytes bytes. */
     public byte[] encodeBlock(short[] pcm, int offset, int codeBytes) {
         return encode(pcm, offset + 1, codeBytes, pcm[offset]);
     }
 
     /**
-     * Encodes exactly 2 * codeBytes samples from pcm[offset] into one block of 4 + codeBytes bytes, the RTP DVI4 way
-     * (RFC 3551): the header holds the decoder's state carried over from the previous block and is not played, so
-     * blocks follow each other without a repeated or a dropped sample.
+     * Turns a block from the WAV nibble order into the one Reolink doorbells decode: each code byte's earlier sample in
+     * its high nibble. Sent low nibble first, the doorbell plays every pair of samples swapped, which rattles on fast
+     * sounds. Found by capturing the Reolink app.
      */
-    public byte[] encodeStateBlock(short[] pcm, int offset, int codeBytes) {
-        return encode(pcm, offset, codeBytes, predictor);
+    public static byte[] highNibbleFirst(byte[] block) {
+        for (int i = 4; i < block.length; i++) block[i] = (byte) ((block[i] & 0x0F) << 4 | (block[i] & 0xF0) >>> 4);
+        return block;
     }
 
     private byte[] encode(short[] pcm, int first, int codeBytes, int start) {
@@ -74,7 +72,6 @@ public final class ImaAdpcm {
             if ((i & 1) == 0) block[4 + i / 2] = (byte) code;
             else block[4 + i / 2] |= (byte) (code << 4);
         }
-        predictor = predicted;
         return block;
     }
 
@@ -132,7 +129,6 @@ public final class ImaAdpcm {
         block[1] = (byte) (start >> 8);
         block[2] = (byte) index;
         index = indexes[best];
-        predictor = predicted[best];
         for (int step = steps - 1, p = best; step >= 0; step--) {
             int code = tCodes[step * k + p];
             if ((step & 1) == 0) block[4 + step / 2] |= (byte) code;
@@ -170,12 +166,6 @@ public final class ImaAdpcm {
         tSeen = new int[table]; tSeenStamp = new int[table];
         tCodes = new byte[steps * k];
         tParents = new short[steps * k];
-    }
-
-    /** Decodes one header-as-state block, for tests: its 2 * codeBytes samples, without the header's. */
-    public static short[] decodeStateBlock(byte[] block) {
-        short[] all = decodeBlock(block);
-        return java.util.Arrays.copyOfRange(all, 1, all.length);
     }
 
     /** Decodes one block, for tests: the samples it carries. */
