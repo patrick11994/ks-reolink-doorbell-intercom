@@ -108,26 +108,21 @@ public final class MediaTest {
 
     /** A sink attaching late gets the cached frames from the last keyframe, then live ones, each once. */
     static void hubReplaysFromKeyframe() {
-        StreamHub hub = new StreamHub("unused", 554, "/", "u", "p", state -> {});
-        java.lang.reflect.Method frame;
-        try {
-            java.lang.reflect.Field running = StreamHub.class.getDeclaredField("running");
-            running.setAccessible(true);
-            running.set(hub, true);
-            frame = StreamHub.class.getDeclaredMethod("onAccessUnit", byte[].class, long.class, boolean.class);
-            frame.setAccessible(true);
-            frame.invoke(hub, new byte[] {1}, 0L, false);  // before any keyframe: undecodable, dropped
-            frame.invoke(hub, new byte[] {2}, 9000L, true);
-            frame.invoke(hub, new byte[] {3}, 12600L, false);
-            frame.invoke(hub, new byte[] {4}, 16200L, true);  // a new keyframe resets the cache
-            frame.invoke(hub, new byte[] {5}, 19800L, false);
-            List<String> seen = new ArrayList<>();
-            hub.attachVideo((au, micros, key) -> seen.add(au[0] + "@" + micros + (key ? "K" : "")));
-            frame.invoke(hub, new byte[] {6}, 23400L, false);
-            check(seen.toString(), "[4@80000K, 5@120000, 6@160000]");
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError(e);
-        }
+        FrameHub hub = new FrameHub();
+        hub.start();
+        hub.video(new byte[] {1}, 0L, false);  // before any keyframe: undecodable, dropped
+        hub.video(new byte[] {2}, 0L, true);
+        hub.video(new byte[] {3}, 40000L, false);
+        hub.video(new byte[] {4}, 80000L, true);  // a new keyframe resets the cache
+        hub.video(new byte[] {5}, 120000L, false);
+        List<String> seen = new ArrayList<>();
+        hub.attachVideo((au, micros, key) -> seen.add(au[0] + "@" + micros + (key ? "K" : "")));
+        hub.video(new byte[] {6}, 160000L, false);
+        check(seen.toString(), "[4@80000K, 5@120000, 6@160000]");
+        check(hub.firstKeyframeMillis() >= 0, true);
+        hub.stop();
+        hub.video(new byte[] {7}, 200000L, false);  // stopped: nothing more is delivered
+        check(seen.size(), 3);
     }
 
     /** A stream that never ends a frame must not grow memory without bound: the frame is dropped at the cap. */

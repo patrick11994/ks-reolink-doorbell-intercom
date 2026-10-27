@@ -108,6 +108,12 @@ public final class LiveBaichuanVideo {
                         if (sink != null) sink.frame(slices(java.util.Arrays.copyOfRange(all, at + 24 + extra, at + 24 + extra + size)), System.nanoTime());
                     } else if (magic.endsWith("wb")) {
                         aac++;
+                        if (TIMING && aac <= 3) {
+                            int size = b.getShort(at + 4) & 0xFFFF;
+                            StringBuilder h = new StringBuilder();
+                            for (int i = 0; i < Math.min(12, size); i++) h.append(String.format("%02x ", all[at + 8 + i] & 0xFF));
+                            System.out.println("  audio " + magic + " " + size + " bytes, starts " + h + "at " + (System.nanoTime() - asked) / 1_000_000 + " ms");
+                        }
                     } else {
                         other++;
                     }
