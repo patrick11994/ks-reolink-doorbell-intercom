@@ -22,6 +22,7 @@ public final class ImaAdpcm {
 
     private final int survivors;
     private int index;
+    private int predictor;  // the decoder's value after the last block, for header-as-state blocks
 
     /** The plain encoder: each code chosen from the current sample. */
     public ImaAdpcm() {
@@ -39,38 +40,55 @@ public final class ImaAdpcm {
         return 2 * codeBytes + 1;
     }
 
-    /** Encodes samplesPerBlock(codeBytes) samples from pcm[offset] into one block of 4 + codeBytes bytes. */
+    /**
+     * Encodes samplesPerBlock(codeBytes) samples from pcm[offset] into one block of 4 + codeBytes bytes, the WAV way:
+     * the header's sample is the block's first sample, and is played.
+     */
     public byte[] encodeBlock(short[] pcm, int offset, int codeBytes) {
-        return survivors == 1 ? encodePlain(pcm, offset, codeBytes) : encodeTrellis(pcm, offset, codeBytes);
+        return encode(pcm, offset + 1, codeBytes, pcm[offset]);
     }
 
-    private byte[] encodePlain(short[] pcm, int offset, int codeBytes) {
+    /**
+     * Encodes exactly 2 * codeBytes samples from pcm[offset] into one block of 4 + codeBytes bytes, the RTP DVI4 way
+     * (RFC 3551): the header holds the decoder's state carried over from the previous block and is not played, so
+     * blocks follow each other without a repeated or a dropped sample.
+     */
+    public byte[] encodeStateBlock(short[] pcm, int offset, int codeBytes) {
+        return encode(pcm, offset, codeBytes, predictor);
+    }
+
+    private byte[] encode(short[] pcm, int first, int codeBytes, int start) {
+        return survivors == 1 ? encodePlain(pcm, first, codeBytes, start) : encodeTrellis(pcm, first, codeBytes, start);
+    }
+
+    private byte[] encodePlain(short[] pcm, int first, int codeBytes, int start) {
         byte[] block = new byte[4 + codeBytes];
-        int predicted = pcm[offset];
+        int predicted = start;
         block[0] = (byte) predicted;
         block[1] = (byte) (predicted >> 8);
         block[2] = (byte) index;
         for (int i = 0; i < 2 * codeBytes; i++) {
-            int code = encode(pcm[offset + 1 + i], predicted);
+            int code = encode(pcm[first + i], predicted);
             predicted = decodeStep(code, predicted);
             index = nextIndex(code, index);
             if ((i & 1) == 0) block[4 + i / 2] = (byte) code;
             else block[4 + i / 2] |= (byte) (code << 4);
         }
+        predictor = predicted;
         return block;
     }
 
-    private byte[] encodeTrellis(short[] pcm, int offset, int codeBytes) {
+    private byte[] encodeTrellis(short[] pcm, int first, int codeBytes, int start) {
         int steps = 2 * codeBytes, k = survivors;
         ensureTrellis(steps, k);
         int[] predicted = tPredicted, indexes = tIndexes, nextPredicted = tNextPredicted, nextIndexes = tNextIndexes;
         long[] cost = tCost, nextCost = tNextCost;
         int alive = 1;
-        predicted[0] = pcm[offset];
+        predicted[0] = start;
         indexes[0] = index;
         cost[0] = 0;
         for (int step = 0; step < steps; step++) {
-            int sample = pcm[offset + 1 + step], n = 0;
+            int sample = pcm[first + step], n = 0;
             for (int p = 0; p < alive; p++) {
                 // The plain encoder's code and its neighbours in size, as ffmpeg's trellis does; far codes never win.
                 int best = encode(sample, predicted[p], indexes[p]);
@@ -110,10 +128,11 @@ public final class ImaAdpcm {
         int best = 0;
         for (int p = 1; p < alive; p++) if (cost[p] < cost[best]) best = p;
         byte[] block = new byte[4 + codeBytes];
-        block[0] = (byte) pcm[offset];
-        block[1] = (byte) (pcm[offset] >> 8);
+        block[0] = (byte) start;
+        block[1] = (byte) (start >> 8);
         block[2] = (byte) index;
         index = indexes[best];
+        predictor = predicted[best];
         for (int step = steps - 1, p = best; step >= 0; step--) {
             int code = tCodes[step * k + p];
             if ((step & 1) == 0) block[4 + step / 2] |= (byte) code;
@@ -151,6 +170,12 @@ public final class ImaAdpcm {
         tSeen = new int[table]; tSeenStamp = new int[table];
         tCodes = new byte[steps * k];
         tParents = new short[steps * k];
+    }
+
+    /** Decodes one header-as-state block, for tests: its 2 * codeBytes samples, without the header's. */
+    public static short[] decodeStateBlock(byte[] block) {
+        short[] all = decodeBlock(block);
+        return java.util.Arrays.copyOfRange(all, 1, all.length);
     }
 
     /** Decodes one block, for tests: the samples it carries. */

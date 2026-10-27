@@ -23,10 +23,13 @@ import io.github.patrick11994.reolinkdoorbell.talk.ImaAdpcm;
  * "beep <pitch> Hz sent at <epoch ms>" for mac_mic_meter.py. An optional 16 kHz mono 16-bit WAV is played after the
  * beeps, to judge the sound. Ends with TalkReset. Protocol learned from neolink (AGPL-3.0); no code copied.
  *
- *     java -cp <classes> io.github.patrick11994.reolinkdoorbell.baichuan.LiveBaichuanTalk [speech.wav] [--encrypt-audio] [--ability] [--no-beeps] [--survivors N]
+ *     java -cp <classes> io.github.patrick11994.reolinkdoorbell.baichuan.LiveBaichuanTalk [speech.wav] [--encrypt-audio] [--ability] [--no-beeps] [--survivors N] [--state-header] [--app-header] [--high-nibble] [--replay bodies.bin]
  *
  * --ability stops after printing the TalkAbility: no sound at the door. --no-beeps plays only the WAV. --survivors sets the
- * ADPCM trellis (1, the default, is the plain encoder).
+ * ADPCM trellis (1, the default, is the plain encoder). --state-header sends 1024-sample blocks whose
+ * header is the decoder state (RFC 3551 DVI4) instead of a played first sample. --app-header writes the media header the way the
+ * Reolink app does (last field 2, no padding). --replay sends 528-byte media bodies captured from the app, as they are.
+ * --high-nibble puts each byte's first sample in its high nibble, as the Reolink app does.
  */
 public final class LiveBaichuanTalk {
     static final int CMD_TALK_ABILITY = 10, CMD_TALK_RESET = 11, CMD_TALK_CONFIG = 201, CMD_TALK = 202;
@@ -40,6 +43,8 @@ public final class LiveBaichuanTalk {
     private byte[] aesKey;
     private int counter;
     private final long started = System.currentTimeMillis();
+    boolean appHeader, highNibble;
+    String replay;
 
     private LiveBaichuanTalk(Socket socket, String password) throws IOException {
         this.in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
@@ -53,12 +58,18 @@ public final class LiveBaichuanTalk {
         String wav = null;
         boolean encryptAudio = false, abilityOnly = false, noBeeps = false;
         int survivors = 1;
+        boolean stateHeader = false, appHeader = false, highNibble = false;
+        String replay = null;
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
             if (a.equals("--encrypt-audio")) encryptAudio = true;
             else if (a.equals("--ability")) abilityOnly = true;
             else if (a.equals("--no-beeps")) noBeeps = true;
             else if (a.equals("--survivors")) survivors = Integer.parseInt(args[++i]);
+            else if (a.equals("--state-header")) stateHeader = true;
+            else if (a.equals("--app-header")) appHeader = true;
+            else if (a.equals("--high-nibble")) highNibble = true;
+            else if (a.equals("--replay")) replay = args[++i];
             else wav = a;
         }
         try (Socket socket = new Socket()) {
@@ -67,7 +78,10 @@ public final class LiveBaichuanTalk {
             socket.setSoTimeout(5000);
             LiveBaichuanTalk talk = new LiveBaichuanTalk(socket, pass);
             talk.login(user);
-            talk.run(wav, encryptAudio, abilityOnly, noBeeps, survivors);
+            talk.appHeader = appHeader;
+            talk.highNibble = highNibble;
+            talk.replay = replay;
+            talk.run(wav, encryptAudio, abilityOnly, noBeeps, survivors, stateHeader);
         }
     }
 
@@ -91,7 +105,7 @@ public final class LiveBaichuanTalk {
         if (answer.statusOrEncryption != 200) throw new IOException("login refused");
     }
 
-    private void run(String wav, boolean encryptAudio, boolean abilityOnly, boolean noBeeps, int survivors) throws Exception {
+    private void run(String wav, boolean encryptAudio, boolean abilityOnly, boolean noBeeps, int survivors, boolean stateHeader) throws Exception {
         // 1. What the doorbell can take.
         BcMessage ability = request(CMD_TALK_ABILITY, extension(false), new byte[0]);
         String abilityXml = decrypt(ability.body, ability);
@@ -124,7 +138,7 @@ public final class LiveBaichuanTalk {
 
         // 3. The audio: silence with five beeps, then the optional speech.
         int codeBytes = lengthPerEncoder / 2;
-        int perBlock = ImaAdpcm.samplesPerBlock(codeBytes);
+        int perBlock = stateHeader ? 2 * codeBytes : ImaAdpcm.samplesPerBlock(codeBytes);
         short[] beeps = new short[noBeeps ? rate : rate * 22];
         int[] pitches = noBeeps ? new int[0] : new int[] {700, 1000, 1300, 1600, 1900};
         int[] beepAt = new int[pitches.length];
@@ -143,6 +157,30 @@ public final class LiveBaichuanTalk {
         Thread replies = new Thread(this::readReplies, "talk-replies");
         replies.setDaemon(true);
         replies.start();
+        if (replay != null) {
+            byte[] bodies = Files.readAllBytes(Paths.get(replay));
+            int talkId = nextId(CHANNEL), sent = 0;
+            byte[] ext = extension(true);
+            long t0 = System.nanoTime();
+            for (int at = 0; at + 528 <= bodies.length; at += 528) {
+                byte[] body = java.util.Arrays.copyOfRange(bodies, at, at + 528);
+                synchronized (out) {
+                    out.write(BcMessage.encodeModern(CMD_TALK, talkId, ext, body));
+                    out.flush();
+                }
+                sent++;
+                long wait = t0 + sent * 64_000_000L - System.nanoTime();
+                if (wait > 0) Thread.sleep(wait / 1_000_000, (int) (wait % 1_000_000));
+            }
+            log("replayed " + sent + " app bodies");
+            Thread.sleep(2500);
+            synchronized (out) {
+                out.write(BcMessage.encodeModern(CMD_TALK_RESET, nextId(CHANNEL), extension(false), new byte[0]));
+                out.flush();
+            }
+            Thread.sleep(500);
+            return;
+        }
 
         ImaAdpcm encoder = new ImaAdpcm(survivors);
         int talkId = nextId(CHANNEL);
@@ -157,8 +195,9 @@ public final class LiveBaichuanTalk {
                 System.out.println("beep " + pitches[nextBeep] + " Hz sent at " + due);
                 nextBeep++;
             }
-            byte[] block = encoder.encodeBlock(all, offset, codeBytes);
-            byte[] media = mediaPacket(block);
+            byte[] block = stateHeader ? encoder.encodeStateBlock(all, offset, codeBytes) : encoder.encodeBlock(all, offset, codeBytes);
+            if (highNibble) for (int b = 4; b < block.length; b++) block[b] = (byte) ((block[b] & 0x0F) << 4 | (block[b] & 0xF0) >>> 4);
+            byte[] media = appHeader ? appMediaPacket(block) : mediaPacket(block);
             byte[] body = encryptAudio ? BcCrypto.aes(aesKey, media, true) : media;
             synchronized (out) {
                 out.write(BcMessage.encodeModern(CMD_TALK, talkId, ext, body));
@@ -189,6 +228,18 @@ public final class LiveBaichuanTalk {
         b.putShort((short) (block.length + 4));
         b.putShort((short) MEDIA_ADPCM_DATA);
         b.putShort((short) ((block.length - 4) / 2));
+        b.put(block);
+        return b.array();
+    }
+
+    /** The media header as the Reolink app writes it: the last field is 2, and there is no padding. */
+    static byte[] appMediaPacket(byte[] block) {
+        ByteBuffer b = ByteBuffer.allocate(12 + block.length).order(ByteOrder.LITTLE_ENDIAN);
+        b.putInt(MEDIA_ADPCM);
+        b.putShort((short) (block.length + 4));
+        b.putShort((short) (block.length + 4));
+        b.putShort((short) MEDIA_ADPCM_DATA);
+        b.putShort((short) 2);
         b.put(block);
         return b.array();
     }
