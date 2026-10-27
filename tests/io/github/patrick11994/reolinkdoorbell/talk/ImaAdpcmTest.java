@@ -43,6 +43,10 @@ public final class ImaAdpcmTest {
         check(java.util.Arrays.equals(ImaAdpcm.highNibbleFirst(doorbell.clone()), wav), true);
         check(java.util.Arrays.equals(java.util.Arrays.copyOf(doorbell, 4), java.util.Arrays.copyOf(wav, 4)), true);  // the header stays
 
+        // Silence takes the cheap path in a trellis encoder too, and comes out as silence.
+        short[] hush = ImaAdpcm.decodeBlock(new ImaAdpcm(16).encodeBlock(new short[perBlock], 0, codeBytes));
+        for (short v : hush) check(v, (short) 0);
+
         // Silence stays silence.
         short[] quiet = new short[perBlock];
         short[] back = ImaAdpcm.decodeBlock(new ImaAdpcm().encodeBlock(quiet, 0, codeBytes));
