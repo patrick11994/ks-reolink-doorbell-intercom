@@ -23,7 +23,9 @@ import io.github.patrick11994.reolinkdoorbell.talk.ImaAdpcm;
  * "beep <pitch> Hz sent at <epoch ms>" for mac_mic_meter.py. An optional 16 kHz mono 16-bit WAV is played after the
  * beeps, to judge the sound. Ends with TalkReset. Protocol learned from neolink (AGPL-3.0); no code copied.
  *
- *     java -cp <classes> io.github.patrick11994.reolinkdoorbell.baichuan.LiveBaichuanTalk [speech.wav] [--encrypt-audio]
+ *     java -cp <classes> io.github.patrick11994.reolinkdoorbell.baichuan.LiveBaichuanTalk [speech.wav] [--encrypt-audio] [--ability]
+ *
+ * --ability stops after printing the TalkAbility: no sound at the door.
  */
 public final class LiveBaichuanTalk {
     static final int CMD_TALK_ABILITY = 10, CMD_TALK_RESET = 11, CMD_TALK_CONFIG = 201, CMD_TALK = 202;
@@ -48,9 +50,10 @@ public final class LiveBaichuanTalk {
         String host = System.getenv("REOLINK_HOST"), user = System.getenv("REOLINK_USER"), pass = System.getenv("REOLINK_PASSWORD");
         if (host == null || user == null || pass == null) throw new IllegalStateException("set REOLINK_HOST, REOLINK_USER and REOLINK_PASSWORD");
         String wav = null;
-        boolean encryptAudio = false;
+        boolean encryptAudio = false, abilityOnly = false;
         for (String a : args) {
             if (a.equals("--encrypt-audio")) encryptAudio = true;
+            else if (a.equals("--ability")) abilityOnly = true;
             else wav = a;
         }
         try (Socket socket = new Socket()) {
@@ -59,7 +62,7 @@ public final class LiveBaichuanTalk {
             socket.setSoTimeout(5000);
             LiveBaichuanTalk talk = new LiveBaichuanTalk(socket, pass);
             talk.login(user);
-            talk.run(wav, encryptAudio);
+            talk.run(wav, encryptAudio, abilityOnly);
         }
     }
 
@@ -83,13 +86,14 @@ public final class LiveBaichuanTalk {
         if (answer.statusOrEncryption != 200) throw new IOException("login refused");
     }
 
-    private void run(String wav, boolean encryptAudio) throws Exception {
+    private void run(String wav, boolean encryptAudio, boolean abilityOnly) throws Exception {
         // 1. What the doorbell can take.
         BcMessage ability = request(CMD_TALK_ABILITY, extension(false), new byte[0]);
         String abilityXml = decrypt(ability.body, ability);
         log("TalkAbility status " + ability.statusOrEncryption + ":\n" + abilityXml);
         String config = first(abilityXml, "audioConfig");
         if (config == null) throw new IOException("no audioConfig in TalkAbility");
+        if (abilityOnly) return;
         int rate = Integer.parseInt(first(config, "sampleRate"));
         int lengthPerEncoder = Integer.parseInt(first(config, "lengthPerEncoder"));
         String type = first(config, "audioType");
