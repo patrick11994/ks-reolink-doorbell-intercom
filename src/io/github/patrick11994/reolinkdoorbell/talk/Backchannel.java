@@ -14,7 +14,7 @@ import io.github.patrick11994.reolinkdoorbell.media.Sdp;
  * every 20 ms. It streams silence from the moment it opens, so the doorbell's fixed ~2 s playout buffer is already
  * filled when someone starts talking; microphone audio replaces the silence while it is fed.
  */
-public final class Backchannel {
+public final class Backchannel implements TalkChannel {
     public interface Listener {
         void onBackchannelState(String state);
     }
@@ -29,9 +29,7 @@ public final class Backchannel {
     private final String host, path, username, password;
     private final int port;
     private final Listener listener;
-    private final short[] ring = new short[MAX_SAMPLES * 2];
-    private int ringStart, ringCount;
-    private boolean flowing;  // microphone audio is being played out (after its start cushion)
+    private final TalkQueue queue = new TalkQueue(START_SAMPLES, MAX_SAMPLES);
     private volatile boolean running;
     private volatile long packetsSent, rtcpReceived;
     private RtspSession session;
@@ -46,7 +44,7 @@ public final class Backchannel {
         this.listener = listener;
     }
 
-    public synchronized void start() {
+    @Override public synchronized void start() {
         if (running) return;
         running = true;
         thread = new Thread(this::run, "reolink-talk");
@@ -54,8 +52,7 @@ public final class Backchannel {
         thread.start();
     }
 
-    /** Stops sending and closes the session; safe from any thread except the main one (it may wait briefly). */
-    public void stop() {
+    @Override public void stop() {
         Thread t;
         synchronized (this) {
             running = false;
@@ -72,27 +69,17 @@ public final class Backchannel {
         }
     }
 
-    /** Microphone audio at 8 kHz. The oldest audio is dropped rather than letting the delay grow. */
-    public synchronized void write(short[] samples, int count) {
-        for (int i = 0; i < count; i++) {
-            if (ringCount == ring.length) {
-                ringStart = (ringStart + 1) % ring.length;
-                ringCount--;
-            }
-            ring[(ringStart + ringCount) % ring.length] = samples[i];
-            ringCount++;
-        }
-        while (ringCount > MAX_SAMPLES) {
-            ringStart = (ringStart + 1) % ring.length;
-            ringCount--;
-        }
+    /** Microphone audio at 8 kHz. */
+    @Override public void write(short[] samples, int count) {
+        queue.write(samples, count);
     }
 
-    /** The microphone stopped (muted or ended): forget what was queued and go back to silence. */
-    public synchronized void clear() {
-        ringStart = 0;
-        ringCount = 0;
-        flowing = false;
+    @Override public void clear() {
+        queue.clear();
+    }
+
+    @Override public int rate() {
+        return RATE;
     }
 
     public long packetsSent() {
@@ -105,16 +92,8 @@ public final class Backchannel {
     }
 
     /** The next 20 ms to send: microphone audio when there is enough, else silence. */
-    synchronized void nextPacket(short[] out) {
-        if (!flowing && ringCount >= START_SAMPLES) flowing = true;
-        if (flowing && ringCount >= PACKET_SAMPLES) {
-            for (int i = 0; i < PACKET_SAMPLES; i++) out[i] = ring[(ringStart + i) % ring.length];
-            ringStart = (ringStart + PACKET_SAMPLES) % ring.length;
-            ringCount -= PACKET_SAMPLES;
-            return;
-        }
-        if (flowing) flowing = false;  // ran dry: wait for a new cushion instead of sending fragments
-        java.util.Arrays.fill(out, (short) 0);
+    void nextPacket(short[] out) {
+        queue.next(out, PACKET_SAMPLES);
     }
 
     private void run() {

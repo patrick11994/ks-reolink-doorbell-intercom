@@ -6,17 +6,17 @@ import android.media.AudioRecord;
 import android.media.MediaRecorder;
 import android.media.audiofx.AcousticEchoCanceler;
 import android.os.Build;
-import io.github.patrick11994.reolinkdoorbell.talk.Backchannel;
 import io.github.patrick11994.reolinkdoorbell.talk.Downsampler;
+import io.github.patrick11994.reolinkdoorbell.talk.TalkChannel;
 
 /**
- * The panel microphone into the backchannel, 10 ms at a time. Panels differ in which source really delivers audio:
+ * The panel microphone into the talk channel, 10 ms at a time. Panels differ in which source really delivers audio:
  * on an RK3576 panel only CAMCORDER does, while MIC, VOICE_COMMUNICATION and VOICE_RECOGNITION go silent. Silence
  * cannot tell a dead source apart, because Rockchip drivers also turn a quiet room into exact zeros, so the source
  * is picked once per call and kept: the one from the Microphone setting, or in Automatic the first that opens,
- * CAMCORDER first. The rate comes first, because the doorbell takes 8 kHz: on an Echo Show a 48 kHz capture opens
- * fine and delivers loud noise, while 16 kHz is clean, so Automatic tries 16, then 48, then 8 kHz, and the
- * Microphone sample rate setting can fix one. Android's echo canceller is attached where the device has one (it
+ * CAMCORDER first. The rate comes first, because the doorbell talks at 16 kHz (8 kHz over ONVIF): on an Echo Show a
+ * 48 kHz capture opens fine and delivers loud noise, while 16 kHz is clean, so Automatic tries 16, then 48, then
+ * 8 kHz, and the Microphone sample rate setting can fix one. Android's echo canceller is attached where the device has one (it
  * mostly works on Voice communication, in call mode). Records only while the microphone is on.
  */
 final class MicCapture {
@@ -37,7 +37,7 @@ final class MicCapture {
     static final String[] RATE_CHOICES = {"16000 Hz", "48000 Hz", "8000 Hz"};
     private static final int[] RATES = {16000, 48000, 8000};
 
-    private final Backchannel backchannel;
+    private final TalkChannel talk;
     private final Listener listener;
     private final String choice;
     private final int[] rates;
@@ -45,8 +45,8 @@ final class MicCapture {
     private final Thread thread;
 
     /** choice is the Microphone setting (one of CHOICES, or Automatic), rateChoice the sample rate one (one of RATE_CHOICES, or Automatic). */
-    MicCapture(Backchannel backchannel, String choice, String rateChoice, Listener listener) {
-        this.backchannel = backchannel;
+    MicCapture(TalkChannel talk, String choice, String rateChoice, Listener listener) {
+        this.talk = talk;
         this.choice = choice;
         this.rates = rates(rateChoice);
         this.listener = listener;
@@ -100,17 +100,31 @@ final class MicCapture {
                 return;
             }
             listener.onMicState("live, " + opened + " " + rate + " Hz, echo canceller " + (echo != null && echo.getEnabled() ? "on" : "none"));
-            Downsampler downsampler = new Downsampler(rate, Backchannel.RATE);
+            int target = talk.rate();
+            // Down to the channel's rate, or up from a slower microphone (8 kHz forced in the settings, 16 kHz talk).
+            int up = rate < target && target % rate == 0 ? target / rate : 1;
+            Downsampler downsampler = new Downsampler(rate * up, target);
             short[] chunk = new short[rate / 100];  // 10 ms
-            short[] out = new short[chunk.length];
+            short[] upChunk = new short[chunk.length * up];
+            short[] out = new short[upChunk.length];
+            int last = 0;
             while (running) {
                 int read = recorder.read(chunk, 0, chunk.length);
                 if (read < 0) {
                     listener.onMicState("microphone read error " + read);
                     return;
                 }
-                int n = downsampler.process(chunk, read, out, 0);
-                if (n > 0) backchannel.write(out, n);
+                int n;
+                if (up == 1) {
+                    n = downsampler.process(chunk, read, out, 0);
+                } else {
+                    for (int i = 0; i < read; i++) {  // linear interpolation; 8 kHz audio has nothing above 4 kHz to lose
+                        for (int k = 0; k < up; k++) upChunk[i * up + k] = (short) (last + (chunk[i] - last) * (k + 1) / up);
+                        last = chunk[i];
+                    }
+                    n = downsampler.process(upChunk, read * up, out, 0);
+                }
+                if (n > 0) talk.write(out, n);
             }
         } catch (RuntimeException error) {
             if (running) listener.onMicState("microphone: " + error);
@@ -122,7 +136,7 @@ final class MicCapture {
             }
             if (echo != null) echo.release();
             recorder.release();
-            backchannel.clear();
+            talk.clear();
         }
     }
 
