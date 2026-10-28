@@ -4,7 +4,7 @@
   <img src="docs/banner.png" alt="Reolink Doorbell Intercom: turns a Kiosk Satellite wall panel into an intercom for your Reolink video doorbell" width="100%">
 </p>
 
-A [Kiosk Satellite](https://kiosksatellite.com) plugin that turns a wall panel into an intercom for a Reolink video doorbell. When someone presses the button, the panel rings at once and shows the doorbell's live video. You can listen in, and you can talk to the door.
+A [Kiosk Satellite](https://kiosksatellite.com) plugin that turns a wall panel into an intercom for a Reolink video doorbell. When someone presses the button, the panel rings instantly and shows the doorbell's live video. You can listen in, and you can talk to the door.
 
 The plugin talks to the doorbell directly on your own network. It needs no Home Assistant, go2rtc, Scrypted, cloud account or other server in between. Home Assistant only comes in when a quick action controls it or shows its state.
 
@@ -18,7 +18,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 
 ## Features
 
-- **Rings at once.** The plugin keeps a connection open to the doorbell, so a press reaches the panel without delay. It wakes the screen, closes the screensaver, plays a soft chime and opens a full-screen call screen. Only the button rings: motion and person detection never do.
+- **Instant ring.** The plugin keeps a connection open to the doorbell, so a press reaches the panel without delay. It wakes the screen, closes the screensaver, plays a soft chime and opens a full-screen call screen. Only the button rings: motion and person detection never do.
 - **Live video.** H.264 straight from the doorbell, decoded in hardware. The plugin asks for the picture the way the Reolink app does, and the doorbell answers with a fresh keyframe at once: on a wall panel the first picture shows about 0.4 s after the press.
 - **Listen, then answer.**
   - **Speaker** plays the sound at the door, with a volume slider on screen, since most panels have no volume buttons.
