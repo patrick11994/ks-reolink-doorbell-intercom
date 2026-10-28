@@ -1,12 +1,18 @@
 # Reolink Doorbell Intercom
 
+<p align="center">
+  <img src="docs/banner.png" alt="Reolink Doorbell Intercom: turns a Kiosk Satellite wall panel into an intercom for your Reolink video doorbell" width="100%">
+</p>
+
 A [Kiosk Satellite](https://kiosksatellite.com) plugin that turns a wall panel into an intercom for a Reolink video doorbell. When someone presses the button, the panel rings at once and shows the doorbell's live video. You can listen in, and you can talk to the door.
 
 The plugin talks to the doorbell directly on your own network. It needs no Home Assistant, go2rtc, Scrypted, cloud account or other server in between. Home Assistant only comes in for the optional cards on the call screen.
 
-<p align="center">
-  <img src="docs/screenshot.jpg" alt="The call screen on a wall panel: the doorbell's live video, with Microphone, Speaker and End call below it" width="320">
-</p>
+| Ringing | In a call | Landscape |
+|:---:|:---:|:---:|
+| <img src="docs/screenshot-ringing.jpg" alt="The call screen while it rings: the doorbell's live video, a Porch light and a Front door card, and Answer, Speaker and Hang up" width="220"> | <img src="docs/screenshot-in-call.jpg" alt="In a call: Microphone active, the cards, the volume slider, and Microphone, Speaker and End call" width="220"> | <img src="docs/screenshot-landscape.jpg" alt="The call screen on a landscape screen: the cards on the left, the video in the middle and the controls on the right" width="352"> |
+
+*The picture is blurred on purpose.*
 
 *Not affiliated with or endorsed by Reolink or the Kiosk Satellite project. Reolink is a trademark of its owner.*
 
