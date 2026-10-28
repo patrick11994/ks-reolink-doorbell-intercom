@@ -10,7 +10,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 
 | Ringing | In a call | Landscape |
 |:---:|:---:|:---:|
-| <img src="docs/screenshot-ringing.jpg" alt="The call screen while it rings: the doorbell's live video, a Lights and a Front door card, and Answer, Speaker and Hang up" width="220"> | <img src="docs/screenshot-in-call.jpg" alt="In a call: Microphone active, the cards, the volume slider, and Microphone, Speaker and End call" width="220"> | <img src="docs/screenshot-landscape.jpg" alt="The call screen on a landscape screen: the cards on the left, the video in the middle and the controls on the right" width="352"> |
+| <img src="docs/screenshot-ringing.jpg" alt="The call screen while it rings: the doorbell's live video, a Lights and a Front door card, and Answer, Speaker and Hang up" width="220"> | <img src="docs/screenshot-in-call.jpg" alt="In a call: Microphone active, the cards, the volume slider, and Microphone, Speaker and End call" width="220"> | <img src="docs/screenshot-landscape.jpg" alt="The call screen on a landscape tablet: the video, with the cards above the controls on the right" width="352"> |
 
 *The picture is blurred on purpose.*
 
@@ -115,7 +115,7 @@ Each card has these fields. It needs an action, an entity or both.
 | **Action** | What a tap does, picked with the same chooser as Gestures: a Home Assistant service, script or automation, a dashboard view, and the rest. Optional: without one, the card only shows the state. |
 | **Hold to run** | Runs the action only after you hold the card for a moment, for a door or a gate |
 
-The card's colour follows the state the way Home Assistant does: a light that is on is amber, a locked lock or an armed alarm green, an unlocked lock or a triggered alarm red, and a state that is changing orange. An entity that Home Assistant does not have, or that is unreachable, shows dimmed as *Unavailable*, never as off. In portrait the cards sit above the call buttons, two to a row; in landscape they get a column on the left.
+The card's colour follows the state the way Home Assistant does: a light that is on is amber, a locked lock or an armed alarm green, an unlocked lock or a triggered alarm red, and a state that is changing orange. An entity that Home Assistant does not have, or that is unreachable, shows dimmed as *Unavailable*, never as off. In portrait the cards sit above the call buttons, two to a row. In landscape they go above the call buttons too when the screen is tall enough, which gives the picture more room, and get their own column on the left otherwise.
 
 ## Good to know
 
