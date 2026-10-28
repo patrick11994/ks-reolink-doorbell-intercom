@@ -207,8 +207,7 @@ final class DoorbellView extends FrameLayout {
     private int buttonDpFor(boolean wide, int heightPx) {
         if (!wide) return 76;
         float density = getResources().getDisplayMetrics().density;
-        // The name, the column's padding, the volume slider and the speaking chip, which wraps to two lines there.
-        float available = heightPx / density - 54 - 48 - 64 - 60;
+        float available = heightPx / density - 54 - 48 - 64;  // the name, the column's padding, the volume slider
         return Math.max(48, Math.min(76, Math.round(available / 3 - 36)));  // each button: circle + 16 ring + 20 label
     }
 
@@ -226,7 +225,6 @@ final class DoorbellView extends FrameLayout {
         if (wide) {
             videoParams.rightMargin = theme.px(SIDE_DP);
             side.addView(title, new LinearLayout.LayoutParams(fill, wrap));
-            side.addView(speaking, chipParams());
             side.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1));
             side.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
             side.addView(buttons, new LinearLayout.LayoutParams(fill, wrap));
@@ -237,6 +235,12 @@ final class DoorbellView extends FrameLayout {
                 cardSide.addView(cardBox, new ScrollView.LayoutParams(fill, wrap));
                 addView(cardSide, new LayoutParams(theme.px(SIDE_DP), LayoutParams.MATCH_PARENT, Gravity.START));
             }
+            // The speaking chip floats at the top middle of the picture, on one line: the screen's middle with cards.
+            LayoutParams chip = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+            chip.topMargin = theme.px(12);
+            chip.leftMargin = videoParams.leftMargin;
+            chip.rightMargin = videoParams.rightMargin;
+            addView(speaking, chip);
         } else {
             topBox.addView(title, new LinearLayout.LayoutParams(fill, wrap));
             topBox.addView(speaking, chipParams());
