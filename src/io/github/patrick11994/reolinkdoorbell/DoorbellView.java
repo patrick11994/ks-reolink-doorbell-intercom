@@ -95,6 +95,7 @@ final class DoorbellView extends FrameLayout {
     /** Landscape cards join the button column only if the buttons can stay at least this big. */
     private static final int MIN_BUTTON_WITH_CARDS_DP = 64;
     private boolean cardsRight;  // landscape: the cards above the buttons, instead of in their own column on the left
+    private int columnPx;  // landscape: each column's width, SIDE_DP plus its share of what the picture leaves
     private State state;
     private boolean speakerOn;
     private boolean micOn;
@@ -245,18 +246,19 @@ final class DoorbellView extends FrameLayout {
         LayoutParams videoParams = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
         int fill = LinearLayout.LayoutParams.MATCH_PARENT, wrap = LinearLayout.LayoutParams.WRAP_CONTENT;
         if (wide) {
-            videoParams.rightMargin = theme.px(SIDE_DP);
+            columnPx = columnPx();
+            videoParams.rightMargin = columnPx;
             side.addView(title, new LinearLayout.LayoutParams(fill, wrap));
             side.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1));
             if (cardsRight) side.addView(cardBox, new LinearLayout.LayoutParams(fill, wrap));
             side.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
             side.addView(buttons, new LinearLayout.LayoutParams(fill, wrap));
             buttons.setOrientation(LinearLayout.VERTICAL);
-            addView(side, new LayoutParams(theme.px(SIDE_DP), LayoutParams.MATCH_PARENT, Gravity.END));
+            addView(side, new LayoutParams(columnPx, LayoutParams.MATCH_PARENT, Gravity.END));
             if (!cards.isEmpty() && !cardsRight) {
-                videoParams.leftMargin = theme.px(SIDE_DP);
+                videoParams.leftMargin = columnPx;
                 cardSide.addView(cardBox, new ScrollView.LayoutParams(fill, wrap));
-                addView(cardSide, new LayoutParams(theme.px(SIDE_DP), LayoutParams.MATCH_PARENT, Gravity.START));
+                addView(cardSide, new LayoutParams(columnPx, LayoutParams.MATCH_PARENT, Gravity.START));
             }
             // The speaking chip floats at the top middle of the picture, on one line: the screen's middle with cards.
             LayoutParams chip = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
@@ -277,6 +279,17 @@ final class DoorbellView extends FrameLayout {
         video.setLayoutParams(videoParams);
         buildCards();
         placeVideo();
+    }
+
+    /**
+     * Landscape: a picture that already fills the height leaves black bars beside it, so the columns take that width
+     * instead, shared when there are two. The picture's own shape once the decoder knows it, 4:3 until then.
+     */
+    private int columnPx() {
+        int columns = !cards.isEmpty() && !cardsRight ? 2 : 1;
+        float aspect = videoWidth > 0 && videoHeight > 0 ? videoWidth / (float) videoHeight : 4f / 3f;
+        int spare = getWidth() - columns * theme.px(SIDE_DP) - Math.round(getHeight() * aspect);
+        return theme.px(SIDE_DP) + Math.max(0, spare) / columns;
     }
 
     /** Portrait: the picture between the name and the controls, so the cards and buttons never cover it. */
@@ -407,6 +420,11 @@ final class DoorbellView extends FrameLayout {
     void setVideoSize(int width, int height) {
         videoWidth = width;
         videoHeight = height;
+        if (landscape && arranged && columnPx() != columnPx) {
+            arrange(true);  // a picture of another shape leaves other bars
+            applyPadding();
+            render();
+        }
         fit();
     }
 
