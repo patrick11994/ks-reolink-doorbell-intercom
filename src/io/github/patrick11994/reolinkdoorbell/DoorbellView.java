@@ -510,13 +510,15 @@ final class DoorbellView extends FrameLayout {
         cardBox.removeAllViews();
         cardBox.setVisibility(cards.isEmpty() ? GONE : VISIBLE);
         int gap = theme.px(landscape ? 8 : 12);
-        // Landscape: one per row in the column. Portrait: two per row, and an odd last one takes the whole row.
+        // Landscape: one per row in the column. Portrait: two per row, always half wide; an odd last one is centred.
         int perRow = landscape ? 1 : 2;
         LinearLayout row = null;
         for (int i = 0; i < cards.size(); i++) {
             if (i % perRow == 0) {
                 row = new LinearLayout(getContext());
                 row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setWeightSum(perRow);
+                row.setGravity(Gravity.CENTER_HORIZONTAL);
                 LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
                 if (i > 0) rowParams.topMargin = gap;
                 cardBox.addView(row, rowParams);
@@ -525,6 +527,8 @@ final class DoorbellView extends FrameLayout {
             cardHolders.add(holder);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, theme.px(64), 1);
             if (i % perRow > 0) params.leftMargin = gap;
+            // A lone last card loses the same gap, so it is exactly as wide as the others.
+            if (perRow == 2 && i == cards.size() - 1 && i % 2 == 0) params.leftMargin = params.rightMargin = gap / 2;
             row.addView(holder.root, params);
             holder.render();
         }
