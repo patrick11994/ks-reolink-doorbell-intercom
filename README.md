@@ -2,7 +2,7 @@
 
 A [Kiosk Satellite](https://kiosksatellite.com) plugin that turns a wall panel into an intercom for a Reolink video doorbell. When someone presses the button, the panel rings at once and shows the doorbell's live video. You can listen in, and you can talk to the door.
 
-The plugin talks to the doorbell directly on your own network. It needs no Home Assistant, go2rtc, Scrypted, cloud account or other server in between.
+The plugin talks to the doorbell directly on your own network. It needs no Home Assistant, go2rtc, Scrypted, cloud account or other server in between. Home Assistant only comes in for the optional cards on the call screen.
 
 <p align="center">
   <img src="docs/screenshot.jpg" alt="The call screen on a wall panel: the doorbell's live video, with Microphone, Speaker and End call below it" width="320">
@@ -20,6 +20,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
   - During a call, **Microphone** and **Speaker** turn each side on and off, and **End call** hangs up.
 - **Closes by itself** when nobody answers. A ring around **Hang up** shows the time left. A touch starts the time over, and Speaker or Answer stop it.
 - **Open it any time** to look outside. Add the **Open** action to the kiosk menu, a gesture or Home Assistant. Opened by hand, it stays open until you close it.
+- **Cards for Home Assistant.** Up to four cards on the call screen, in the style of Home Assistant's tile card: each runs an action you pick, such as opening the door through a relay or toggling the porch light, and can show the live state of an entity, such as the light, a lock or the alarm. A card for a door or gate can ask to be held, so it never runs by accident.
 - **Pauses the music** if you like: at the ring, or once you listen or talk, and resumes it afterwards.
 - **Check button** on the settings page. It tests the address, the login, video and talking, and says what to fix.
 - **English and Dutch** for the call screen and messages.
@@ -30,7 +31,9 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 |---|---|
 | **Doorbell** | A Reolink video doorbell on your local network, reachable from the panel. Tested with the **Reolink Video Doorbell PoE**, firmware v3.0.0.6460. Other Reolink doorbells that offer RTSP should work, but have not been tested. |
 | **On the doorbell** | **RTSP** turned on, and preferably **ONVIF** too. In the Reolink app, go to Settings > Network > Advanced > Server Settings. Video and talking go over Reolink's own protocol (Baichuan, port 9000); RTSP and ONVIF are the fallbacks for doorbells that refuse that, and the **Check** button uses RTSP. The doorbell must be a *local device*, not an *account device*. |
-| **Panel** | Kiosk Satellite **2026.10.41** or newer, Android 8.0 or newer, with a microphone and a speaker. Tested on an RK3576 Android 14 panel. |
+| **Panel** | Kiosk Satellite **2026.10.42** or newer, Android 8.0 or newer, with a microphone and a speaker. Tested on an RK3576 Android 14 panel. |
+
+The cards need Kiosk Satellite's own Home Assistant connection (Settings > Home Assistant); the rest of the plugin works without it.
 
 A doorbell that is connected through a Reolink NVR or Home Hub, rather than directly to your network, is not supported yet.
 
@@ -57,6 +60,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 3. Press **Check**. It should say that button presses, video and talking all work. If not, it tells you what to change.
 4. Optional: under **Actions**, open **Open** and turn on **Show in kiosk menu**. You can then look outside from the menu.
 5. Optional: under **Gestures**, use the **Doorbell pressed** trigger to run something on every ring, such as showing a Home Assistant view.
+6. Optional: under **Cards**, press **Add card** for each button or state you want on the call screen. See [Cards](#cards).
 
 ## Settings
 
@@ -74,13 +78,14 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Ringing | **Close the viewer after** | 30 seconds to 5 minutes, or Off. Counts only while it rings untouched. | 1 minute |
 | Ringing | **End a call after** | 5, 10 or 30 minutes, or Off. Counts from Answer, Speaker or opening it by hand, so a forgotten call does not keep the room on the line. | 10 minutes |
 | Video and audio | **Video over** | *Automatic* (Baichuan, and RTSP if Baichuan fails before the first picture), *Baichuan* or *RTSP* | Automatic |
-| Video and audio | **Video** | *Main* (2560×1920, sharp) or *Sub* (640×480, light) | Main |
+| Video and audio | **Video** | *Main* (sharp; 2560×1920 on a Video Doorbell PoE) or *Sub* (light; 640×480 there). Pick Sub if the picture stays black. | Main |
 | Video and audio | **Call volume** | How loud the doorbell plays on the panel. The slider on the call screen changes it too. | 70 |
 | Video and audio | **Microphone** | Automatic, or a fixed Android microphone source: Camcorder, Voice communication, Microphone, Voice recognition or Unprocessed | Automatic |
 | Video and audio | **Talk over** | *Automatic* (Baichuan, and ONVIF if the doorbell refuses it), *Baichuan* (about 1 s to the door, 16 kHz) or *ONVIF* (about 2 s, 8 kHz) | Automatic |
 | Video and audio | **Microphone sample rate** | Automatic (16000 Hz, then 48000 Hz, then 8000 Hz), or one fixed rate | Automatic |
 | Video and audio | **Android call mode** | Switches Android to call mode on the loudspeaker during a call, which most devices need for echo cancelling | on |
 | Video and audio | **Language** | Automatic (the panel's Android language), English or Nederlands | Automatic |
+| Cards | **Cards** | Up to four cards on the call screen. See [Cards](#cards). | none |
 
 **Actions:**
 
@@ -92,16 +97,31 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 
 **Trigger:** **Doorbell pressed**, for Gestures.
 
+### Cards
+
+Each card has these fields. It needs an action, an entity or both.
+
+| Field | What it does |
+|---|---|
+| **Label** | The card's name. Empty uses the entity's name. |
+| **Icon** | Any Material Design icon. Empty follows the entity and its state, the way Home Assistant shows it. |
+| **State** | A Home Assistant entity whose live state the card shows, such as `light.porch`, `lock.front_door` or `alarm_control_panel.home`. Optional. |
+| **Action** | What a tap does, picked with the same chooser as Gestures: a Home Assistant service, script or automation, a dashboard view, and the rest. Optional: without one, the card only shows the state. |
+| **Hold to run** | Runs the action only after you hold the card for a moment, for a door or a gate |
+
+The card's colour follows the state the way Home Assistant does: a light that is on is amber, a locked lock or an armed alarm green, an unlocked lock or a triggered alarm red, and a state that is changing orange. An entity that Home Assistant does not have, or that is unreachable, shows dimmed as *Unavailable*, never as off. In portrait the cards sit above the call buttons, two to a row; in landscape they get a column on the left.
+
 ## Good to know
 
 - **Talking has a delay of about 1 second.** The plugin talks the way the Reolink app does, over Reolink's own protocol, in 16 kHz audio: measured at the door, your voice arrives 1.05 s after the panel sends it. Over the ONVIF backchannel (the **Talk over** setting, or the fallback) the doorbell itself holds about 2.1 s of audio before it plays it, and the sound is 8 kHz telephone quality. A *Microphone active* label reminds you while the microphone is on.
 - **Echo.** The doorbell's sound plays as call audio, in Android's call mode on the loudspeaker, and Android's echo canceller is attached to the microphone where the device has one. That keeps the panel's own speaker out of the microphone on most devices. Echo cancelling usually works best with **Microphone** set to *Voice communication*. If a visitor hears themselves, try that, turn the panel's speaker down, or turn off **Speaker** while you talk.
 - **The wake word** pauses during a call. While the doorbell's sound plays or the microphone is on, the plugin mutes Kiosk Satellite's wake word, so the door cannot trigger the assistant, and then unmutes it afterwards. A wake word you muted yourself stays muted.
+- **Cards follow their entities only while the call screen is open**, through Kiosk Satellite's own Home Assistant connection, so the plugin never sees your Home Assistant address or token. When a card runs a Home Assistant service, Kiosk Satellite shows its own confirmation toast, as it does for gestures; the *Gesture actions* entry under Device > User Interface > Show system toast notifications turns those off, for gestures too.
 - **Which microphone.** Panels differ in which Android microphone source really works; on an RK3576 panel only *Camcorder* does. **Automatic** uses the first source that opens, Camcorder first, and keeps it for the whole call. If the door does not hear you, pick another one under **Microphone**. If the door hears loud noise instead of you, try another **Microphone sample rate**: on an Echo Show, 48000 Hz gives noise and 16000 Hz is clean.
 
 ## Privacy and security
 
-- **Nothing leaves your network.** The plugin connects only to the doorbell, on two ports: 9000 (button presses, video and sound, and talking) and 554 (RTSP and the ONVIF audio backchannel, when the plugin falls back to them, and for the Check button). It has no analytics, and it contacts no other service.
+- **Nothing leaves your network.** The plugin connects only to the doorbell, on two ports: 9000 (button presses, video and sound, and talking) and 554 (RTSP and the ONVIF audio backchannel, when the plugin falls back to them, and for the Check button). It has no analytics, and it contacts no other service. The optional cards read the entities you pick and run the actions you pick through Kiosk Satellite's own Home Assistant connection; the plugin never gets its address or token.
 - **The doorbell password** is stored as a Kiosk Satellite secret setting. Plugin Manager and Remote Admin mask it. Use a separate, non-admin Reolink user for the panel.
 - **The connections are not encrypted.** Reolink's local protocols are not, so keep the doorbell and the panel on a trusted network.
 - **The microphone** is only on while the call screen shows **Microphone** as on, and every call ends after **End a call after**. Nothing is recorded or stored.
@@ -124,6 +144,9 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | The door hears itself (echo or a feedback loop) | Set **Microphone** to *Voice communication*, and keep **Android call mode** on |
 | Sound or the microphone stops working in a call | Turn off **Android call mode** |
 | The chime is too quiet | Raise **Chime volume**. If it is still quiet, set **Chime sound** to *Media*, the volume most tablets show, or to *Alarm*. |
+| The picture stays black, but sound works | The device cannot decode the main stream. Set **Video** to *Sub*. |
+| A card shows *Unavailable* | Check Kiosk Satellite's Home Assistant connection, and that the entity still exists |
+| A card does nothing | Check its **Action**. The Logs say what happened (*card: … failed: …*). |
 | You hear nothing with Speaker on | Raise the slider on the call screen. It sets Android's call volume, which is separate from the media volume. |
 
 ## Building

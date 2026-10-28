@@ -417,7 +417,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         Settings s = settings;
         if (stream != null || !s.configured()) return;
         ringAt = System.currentTimeMillis();
-        log("media: start stream " + s.streamPath + " over " + (s.videoPath.equals("RTSP") ? "RTSP" : "Baichuan"));
+        log("media: start stream " + s.streamPath + " over " + (s.videoPath.equals("RTSP") ? "RTSP" : "Baichuan") + " (Video over: " + s.videoPath + ")");
         publishText("first_frame", texts.firstPictureReading(), texts.waiting());
         stream = openStream(s);
         stream.start();
