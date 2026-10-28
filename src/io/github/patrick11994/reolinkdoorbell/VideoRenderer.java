@@ -2,13 +2,14 @@
 package io.github.patrick11994.reolinkdoorbell;
 
 import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.os.Build;
 import android.view.Surface;
 import java.nio.ByteBuffer;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
-import io.github.patrick11994.reolinkdoorbell.media.SpsInfo;
+import io.github.patrick11994.reolinkdoorbell.media.AvcConfig;
 import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
 
 /**
@@ -21,6 +22,8 @@ final class VideoRenderer implements MediaStream.VideoSink {
         /** First frame on screen, and the decoder's average delay from input to output. */
         void onVideoStats(long firstFrameMillis, double decodeMillis);
         void onVideoError(String message);
+        /** The decoder's setup, for the log: which decoder, the stream's profile, level and size. */
+        void onVideoLog(String message);
     }
 
     private static final class Frame {
@@ -79,6 +82,7 @@ final class VideoRenderer implements MediaStream.VideoSink {
         long[] queuedMicros = new long[256];
         double decodeAverage = 0;
         boolean shown = false;
+        String stage = "create";  // where a decoder error happened, for the log
         try {
             Frame first = null;
             boolean warned = false;
@@ -91,14 +95,36 @@ final class VideoRenderer implements MediaStream.VideoSink {
                 }
             }
             if (first == null) return;
-            SpsInfo size = size(first.data);
-            MediaFormat format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, size == null ? 1920 : size.width, size == null ? 1080 : size.height);
-            if (Build.VERSION.SDK_INT >= 30) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1);
+            AvcConfig config = AvcConfig.of(first.data);
+            MediaFormat format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, config.size == null ? 1920 : config.size.width, config.size == null ? 1080 : config.size.height);
+            // The parameter sets up front as well as in the stream: older decoders, such as MediaTek's, want them there.
+            if (config.complete()) {
+                format.setByteBuffer("csd-0", ByteBuffer.wrap(AvcConfig.withStartCode(config.sps)));
+                format.setByteBuffer("csd-1", ByteBuffer.wrap(AvcConfig.withStartCode(config.pps)));
+            }
             format.setInteger(MediaFormat.KEY_PRIORITY, 0);  // realtime
             codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
+            // Low latency only where the decoder offers it: some refuse a format that asks for what they lack.
+            boolean lowLatency = false;
+            if (Build.VERSION.SDK_INT >= 30) {
+                try {
+                    lowLatency = codec.getCodecInfo().getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
+                        .isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency);
+                } catch (RuntimeException unknown) {
+                    // Treated as not offered.
+                }
+                if (lowLatency) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1);
+            }
+            listener.onVideoLog("video decoder: " + codec.getName() + (Build.VERSION.SDK_INT >= 29 && !codec.getCodecInfo().isHardwareAccelerated() ? " (software)" : "")
+                + ", " + config.describe() + ", parameter sets " + (config.complete() ? "up front" : "missing from the keyframe")
+                + ", low latency " + (lowLatency ? "on" : "not offered"));
+            stage = "configure";
             codec.configure(format, surface, null, 0);
+            stage = "start";
             codec.start();
-            if (size != null) listener.onVideoSize(size.width, size.height);
+            stage = "decode";
+            if (config.size != null) listener.onVideoSize(config.size.width, config.size.height);
+            boolean warnedTooLarge = false;
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
             Frame pending = first;
             int slot = 0;
@@ -116,6 +142,10 @@ final class VideoRenderer implements MediaStream.VideoSink {
                             queuedMicros[slot % 256] = pending.micros;
                             slot++;
                         } else {
+                            if (!warnedTooLarge) {
+                                warnedTooLarge = true;
+                                listener.onVideoLog("video decoder: a frame of " + pending.data.length + " bytes does not fit its " + buffer.remaining() + "-byte input buffer, dropped");
+                            }
                             codec.queueInputBuffer(input, 0, 0, pending.micros, 0);
                         }
                         pending = null;
@@ -158,28 +188,18 @@ final class VideoRenderer implements MediaStream.VideoSink {
             }
         } catch (InterruptedException stopped) {
             // Released.
+        } catch (MediaCodec.CodecException error) {
+            if (!running) return;
+            listener.onVideoLog("video decoder: failed at " + stage + ", error code " + error.getErrorCode()
+                + (error.isTransient() ? ", transient" : "") + (error.isRecoverable() ? ", recoverable" : "") + ", " + error.getDiagnosticInfo());
+            listener.onVideoError("video decoder: " + error);
         } catch (Exception error) {
-            if (running) listener.onVideoError("video decoder: " + error);
+            if (running) listener.onVideoError("video decoder: " + error + " at " + stage);
         } finally {
             if (codec != null) {
                 try { codec.stop(); } catch (RuntimeException ignored) {}
                 codec.release();
             }
         }
-    }
-
-    /** The picture size from the SPS at the start of a keyframe. */
-    private static SpsInfo size(byte[] annexB) {
-        for (int i = 0; i + 4 < annexB.length; i++) {
-            if (annexB[i] == 0 && annexB[i + 1] == 0 && annexB[i + 2] == 0 && annexB[i + 3] == 1 && (annexB[i + 4] & 0x1F) == 7) {
-                int end = i + 4;
-                while (end + 3 < annexB.length && !(annexB[end] == 0 && annexB[end + 1] == 0 && annexB[end + 2] == 0 && annexB[end + 3] == 1)) end++;
-                if (end + 3 >= annexB.length) end = annexB.length;
-                byte[] sps = new byte[end - i - 4];
-                System.arraycopy(annexB, i + 4, sps, 0, sps.length);
-                return SpsInfo.parse(sps);
-            }
-        }
-        return null;
     }
 }

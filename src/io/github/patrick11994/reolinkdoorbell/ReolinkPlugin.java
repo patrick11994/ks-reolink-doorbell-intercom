@@ -534,6 +534,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 showMessage(shown);
                 log(shown);
             }
+
+            @Override public void onVideoLog(String message) {
+                log(message);
+            }
         });
         if (stream != null) stream.attachVideo(videoRenderer);
     }
