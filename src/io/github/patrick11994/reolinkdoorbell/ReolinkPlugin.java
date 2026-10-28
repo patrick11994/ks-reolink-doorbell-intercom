@@ -331,13 +331,14 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         DoorbellView v = view;
         if (h == null || !card.action) return;
         Texts t = texts;
-        if (v != null) v.cardFeedback(card, "…");
+        if (v != null) v.cardFeedback(card, DoorbellView.RUNNING);
         try {
             h.runAction(card.actionPath(), (ok, data, error) -> {
                 log("card: " + (card.label.isEmpty() ? card.actionPath() : card.label) + (ok ? " ran" : " failed: " + error));
                 DoorbellView now = view;
-                // With a state to follow, the state itself confirms it; otherwise say it is done.
-                String shown = ok ? (card.hasEntity() ? null : t.cardDone()) : t.cardFailed();
+                // With a state to follow, the card keeps showing it is running until the new state arrives.
+                if (ok && card.hasEntity()) return;
+                String shown = ok ? t.cardDone() : t.cardFailed();
                 if (now != null) now.post(() -> now.cardFeedback(card, shown));
             });
         } catch (UnsupportedOperationException older) {

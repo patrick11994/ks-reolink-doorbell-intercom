@@ -60,6 +60,9 @@ final class DoorbellView extends FrameLayout {
 
     private static final long HOLD_MILLIS = 800;
     private static final long FEEDBACK_MILLIS = 2500;
+    /** How long a card with a state waits for it to change after its action ran. */
+    private static final long STATE_WAIT_MILLIS = 5000;
+    static final String RUNNING = "…";
 
     private final Callback callback;
     private final String name;
@@ -493,7 +496,10 @@ final class DoorbellView extends FrameLayout {
     void entityChanged(String entityId, Map<?, ?> snapshot) {
         snapshots.put(entityId, snapshot);
         for (CardHolder holder : cardHolders) {
-            if (holder.card.entityId.equals(entityId)) holder.render();
+            if (!holder.card.entityId.equals(entityId)) continue;
+            // The new state is the answer to a running action: no flash of the old one in between.
+            if (RUNNING.equals(holder.feedback)) holder.feedback(null);
+            else holder.render();
         }
     }
 
@@ -617,7 +623,7 @@ final class DoorbellView extends FrameLayout {
         void feedback(String text) {
             feedback = text;
             root.removeCallbacks(clearFeedback);
-            if (text != null && !text.equals("…")) root.postDelayed(clearFeedback, FEEDBACK_MILLIS);
+            if (text != null) root.postDelayed(clearFeedback, text.equals(RUNNING) ? STATE_WAIT_MILLIS : FEEDBACK_MILLIS);
             render();
         }
 
