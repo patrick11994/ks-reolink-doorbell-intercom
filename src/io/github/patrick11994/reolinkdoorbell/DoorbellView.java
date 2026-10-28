@@ -91,6 +91,10 @@ final class DoorbellView extends FrameLayout {
     private boolean arranged;
     private int buttonDp = 76;
     private static final int SIDE_DP = 160;
+    private static final int CARD_DP = 64, CARD_GAP_DP = 8;
+    /** Landscape cards join the button column only if the buttons can stay at least this big. */
+    private static final int MIN_BUTTON_WITH_CARDS_DP = 64;
+    private boolean cardsRight;  // landscape: the cards above the buttons, instead of in their own column on the left
     private State state;
     private boolean speakerOn;
     private boolean micOn;
@@ -192,9 +196,11 @@ final class DoorbellView extends FrameLayout {
     @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
         boolean wide = width > height;
-        int size = buttonDpFor(wide, height);
-        if (wide != landscape || size != buttonDp || !arranged) {
+        boolean right = wide && cardsFitRight(height);
+        int size = buttonDpFor(wide, height, right);
+        if (wide != landscape || size != buttonDp || right != cardsRight || !arranged) {
             buttonDp = size;
+            cardsRight = right;
             post(() -> {
                 arrange(wide);
                 applyPadding();
@@ -204,11 +210,27 @@ final class DoorbellView extends FrameLayout {
     }
 
     /** Buttons shrink a little on a low landscape screen, so all three always fit in the column. */
-    private int buttonDpFor(boolean wide, int heightPx) {
+    private int buttonDpFor(boolean wide, int heightPx, boolean withCards) {
         if (!wide) return 76;
-        float density = getResources().getDisplayMetrics().density;
-        float available = heightPx / density - 54 - 48 - 64;  // the name, the column's padding, the volume slider
+        float available = columnSpareDp(heightPx) - (withCards ? cardsDp() : 0);
         return Math.max(48, Math.min(76, Math.round(available / 3 - 36)));  // each button: circle + 16 ring + 20 label
+    }
+
+    /** The landscape column's height left for the buttons and cards: less the name, the padding, the volume slider. */
+    private float columnSpareDp(int heightPx) {
+        return heightPx / getResources().getDisplayMetrics().density - 54 - 48 - 64;
+    }
+
+    private float cardsDp() {
+        return cards.size() * (CARD_DP + CARD_GAP_DP) + 4;
+    }
+
+    /**
+     * Landscape: the cards go above the buttons when all of them fit there with the buttons still a good size, which
+     * gives the picture the left column's width. On a lower screen they keep their own column on the left.
+     */
+    private boolean cardsFitRight(int heightPx) {
+        return !cards.isEmpty() && columnSpareDp(heightPx) - cardsDp() >= 3 * (MIN_BUTTON_WITH_CARDS_DP + 36);
     }
 
     /** Places the name, chip, slider and buttons for portrait or landscape. */
@@ -226,11 +248,12 @@ final class DoorbellView extends FrameLayout {
             videoParams.rightMargin = theme.px(SIDE_DP);
             side.addView(title, new LinearLayout.LayoutParams(fill, wrap));
             side.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1));
+            if (cardsRight) side.addView(cardBox, new LinearLayout.LayoutParams(fill, wrap));
             side.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
             side.addView(buttons, new LinearLayout.LayoutParams(fill, wrap));
             buttons.setOrientation(LinearLayout.VERTICAL);
             addView(side, new LayoutParams(theme.px(SIDE_DP), LayoutParams.MATCH_PARENT, Gravity.END));
-            if (!cards.isEmpty()) {
+            if (!cards.isEmpty() && !cardsRight) {
                 videoParams.leftMargin = theme.px(SIDE_DP);
                 cardSide.addView(cardBox, new ScrollView.LayoutParams(fill, wrap));
                 addView(cardSide, new LayoutParams(theme.px(SIDE_DP), LayoutParams.MATCH_PARENT, Gravity.START));
@@ -284,7 +307,8 @@ final class DoorbellView extends FrameLayout {
         int pad = theme.px(24);
         if (landscape) {
             side.setPadding(theme.px(8), pad, theme.px(8), pad);
-            cardBox.setPadding(theme.px(8), pad, theme.px(8), pad);
+            if (cardsRight) cardBox.setPadding(0, 0, 0, theme.px(12));
+            else cardBox.setPadding(theme.px(8), pad, theme.px(8), pad);
             buttons.setPadding(0, 0, 0, 0);
             volumeRow.setPadding(theme.px(4), 0, theme.px(4), theme.px(16));
         } else {
@@ -488,8 +512,12 @@ final class DoorbellView extends FrameLayout {
 
     /** The cards from the settings; a change of cards rearranges, since landscape gives them a column only if any. */
     void setCards(List<Cards.Card> cards) {
-        boolean column = this.cards.isEmpty() != cards.isEmpty();
+        boolean column = this.cards.isEmpty() != cards.isEmpty() || this.cards.size() != cards.size();
         this.cards = cards;
+        if (landscape && arranged) {
+            cardsRight = cardsFitRight(getHeight());
+            buttonDp = buttonDpFor(true, getHeight(), cardsRight);
+        }
         if (column && arranged) {
             arrange(landscape);
             applyPadding();
