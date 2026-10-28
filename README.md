@@ -6,7 +6,7 @@
 
 A [Kiosk Satellite](https://kiosksatellite.com) plugin that turns a wall panel into an intercom for a Reolink video doorbell. When someone presses the button, the panel rings at once and shows the doorbell's live video. You can listen in, and you can talk to the door.
 
-The plugin talks to the doorbell directly on your own network. It needs no Home Assistant, go2rtc, Scrypted, cloud account or other server in between. Home Assistant only comes in for the optional cards on the call screen.
+The plugin talks to the doorbell directly on your own network. It needs no Home Assistant, go2rtc, Scrypted, cloud account or other server in between. Home Assistant only comes in when a quick action controls it or shows its state.
 
 | Ringing | In a call | Landscape |
 |:---:|:---:|:---:|
@@ -26,7 +26,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
   - During a call, **Microphone** and **Speaker** turn each side on and off, and **End call** hangs up.
 - **Closes by itself** when nobody answers. A ring around **Hang up** shows the time left. A touch starts the time over, and Speaker or Answer stop it.
 - **Open it any time** to look outside. Add the **Open** action to the kiosk menu, a gesture or Home Assistant. Opened by hand, it stays open until you close it.
-- **Cards for Home Assistant.** Up to four cards on the call screen, in the style of Home Assistant's tile card: each runs an action you pick, such as opening the door through a relay or toggling the porch light, and can show the live state of an entity, such as the light, a lock or the alarm. A card for a door or gate can ask to be held, so it never runs by accident.
+- **Quick actions on the call screen.** Up to four cards above the call buttons, styled like Home Assistant's tiles. Each runs an action you pick with the same chooser as Gestures: a Home Assistant service or script, such as opening the door through a relay or toggling the lights, or anything else a gesture can do on the panel, such as opening a dashboard view. A card can also show the live state of a Home Assistant entity, such as a light or a lock. A card for a door or gate can ask to be held, so it never runs by accident.
 - **Pauses the music** if you like: at the ring, or once you listen or talk, and resumes it afterwards.
 - **Check button** on the settings page. It tests the address, the login, video and talking, and says what to fix.
 - **English and Dutch** for the call screen and messages.
