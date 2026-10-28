@@ -96,6 +96,15 @@ final class DoorbellView extends FrameLayout {
     private static final int MIN_BUTTON_WITH_CARDS_DP = 64;
     private boolean cardsRight;  // landscape: the cards above the buttons, instead of in their own column on the left
     private int columnPx;  // landscape: each column's width, SIDE_DP plus its share of what the picture leaves
+    // A nearly square screen (an NSPanel Pro) has no room beside the picture: it fills the screen, the controls float
+    // over it on dark gradients, the cards become a row of round buttons, and during a call the controls hide.
+    private boolean overlay;
+    private static final float OVERLAY_ASPECT = 1.3f;  // portrait screens lower than this many times their width
+    private static final int OVERLAY_BUTTON_DP = 56, ROUND_CARD_DP = 52;
+    private static final long HIDE_MILLIS = 3000;
+    private boolean controlsHidden;
+    private final TextView hint;  // overlay: what a round card has to say, which it has no room for
+    private final Runnable hideControls = () -> setControlsHidden(true);
     private State state;
     private boolean speakerOn;
     private boolean micOn;
@@ -180,6 +189,9 @@ final class DoorbellView extends FrameLayout {
         spacer = new View(context);
         cardBox = new LinearLayout(context);
         cardBox.setOrientation(LinearLayout.VERTICAL);
+        hint = new TextView(context);
+        hint.setGravity(Gravity.CENTER);
+        hint.setVisibility(GONE);
         cardSide = new ScrollView(context);
         cardSide.setVerticalScrollBarEnabled(false);
         // The picture fills what the name and the controls leave, so the cards never cover it.
@@ -198,10 +210,12 @@ final class DoorbellView extends FrameLayout {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
         boolean wide = width > height;
         boolean right = wide && cardsFitRight(height);
-        int size = buttonDpFor(wide, height, right);
-        if (wide != landscape || size != buttonDp || right != cardsRight || !arranged) {
+        boolean square = !wide && height < width * OVERLAY_ASPECT;
+        int size = square ? OVERLAY_BUTTON_DP : buttonDpFor(wide, height, right);
+        if (wide != landscape || size != buttonDp || right != cardsRight || square != overlay || !arranged) {
             buttonDp = size;
             cardsRight = right;
+            overlay = square;
             post(() -> {
                 arrange(wide);
                 applyPadding();
@@ -238,7 +252,9 @@ final class DoorbellView extends FrameLayout {
     private void arrange(boolean wide) {
         arranged = getWidth() > 0;
         landscape = wide;
-        for (View piece : new View[] {title, speaking, volumeRow, buttons, spacer, cardBox}) detach(piece);
+        for (View piece : new View[] {title, speaking, volumeRow, buttons, spacer, cardBox, hint}) detach(piece);
+        topBox.setBackground(null);
+        bottomBox.setBackground(null);
         removeView(topBox);
         removeView(bottomBox);
         removeView(side);
@@ -267,7 +283,29 @@ final class DoorbellView extends FrameLayout {
             chip.leftMargin = videoParams.leftMargin / 2;
             chip.rightMargin = videoParams.rightMargin / 2;
             addView(speaking, chip);
+        } else if (overlay) {
+            // The name and the chip side by side, so the chip never lands on the cards.
+            topBox.setOrientation(LinearLayout.HORIZONTAL);
+            topBox.setGravity(Gravity.CENTER);
+            topBox.addView(title, new LinearLayout.LayoutParams(wrap, wrap));
+            LinearLayout.LayoutParams chip = new LinearLayout.LayoutParams(wrap, wrap);
+            chip.leftMargin = theme.px(12);
+            topBox.addView(speaking, chip);
+            topBox.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] {0xB3000000, 0x00000000}));
+            addView(topBox, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP));
+            LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(wrap, wrap);
+            hintParams.gravity = Gravity.CENTER_HORIZONTAL;
+            hintParams.bottomMargin = theme.px(8);
+            bottomBox.addView(hint, hintParams);
+            bottomBox.addView(cardBox, new LinearLayout.LayoutParams(fill, wrap));
+            bottomBox.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
+            bottomBox.addView(buttons, new LinearLayout.LayoutParams(fill, wrap));
+            buttons.setOrientation(LinearLayout.HORIZONTAL);
+            bottomBox.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, new int[] {0xCC000000, 0x99000000, 0x00000000}));
+            addView(bottomBox, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
         } else {
+            topBox.setOrientation(LinearLayout.VERTICAL);
+            topBox.setGravity(Gravity.CENTER_HORIZONTAL);
             topBox.addView(title, new LinearLayout.LayoutParams(fill, wrap));
             topBox.addView(speaking, chipParams());
             addView(topBox, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP));
@@ -278,8 +316,15 @@ final class DoorbellView extends FrameLayout {
             addView(bottomBox, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
         }
         video.setLayoutParams(videoParams);
+        if (!overlay && controlsHidden) {
+            // Out of the overlay layout, such as after a rotation: everything shows again.
+            controlsHidden = false;
+            title.setVisibility(VISIBLE);
+        }
         buildCards();
         placeVideo();
+        if (overlay) scheduleHide();  // also for a viewer that opens straight into a call
+        else removeCallbacks(hideControls);
     }
 
     /**
@@ -298,8 +343,8 @@ final class DoorbellView extends FrameLayout {
         if (landscape) return;
         LayoutParams params = (LayoutParams) video.getLayoutParams();
         int top = topBox.getHeight(), bottom = bottomBox.getHeight();
-        // A screen too low for both (a small square one) gets the picture behind the controls, as before the cards.
-        if (getHeight() - top - bottom < getHeight() / 3) top = bottom = 0;
+        // The overlay layout, or a screen too low for both, gets the picture behind the controls.
+        if (overlay || getHeight() - top - bottom < getHeight() / 3) top = bottom = 0;
         if (params.topMargin == top && params.bottomMargin == bottom) return;
         params.topMargin = top;
         params.bottomMargin = bottom;
@@ -325,8 +370,15 @@ final class DoorbellView extends FrameLayout {
             else cardBox.setPadding(theme.px(8), pad, theme.px(8), pad);
             buttons.setPadding(0, 0, 0, 0);
             volumeRow.setPadding(theme.px(4), 0, theme.px(4), theme.px(16));
+        } else if (overlay) {
+            topBox.setPadding(pad, theme.px(16), pad, theme.px(28));
+            bottomBox.setPadding(0, theme.px(40), 0, 0);
+            cardBox.setPadding(pad, 0, pad, theme.px(12));
+            buttons.setPadding(theme.px(12), 0, theme.px(12), theme.px(16));
+            volumeRow.setPadding(theme.px(32), 0, theme.px(32), theme.px(8));
         } else {
             topBox.setPadding(pad, pad, pad, 0);
+            bottomBox.setPadding(0, 0, 0, 0);
             cardBox.setPadding(pad, theme.px(16), pad, theme.px(8));
             buttons.setPadding(pad, 0, pad, theme.px(32));
             volumeRow.setPadding(theme.px(40), 0, theme.px(40), theme.px(20));
@@ -363,6 +415,13 @@ final class DoorbellView extends FrameLayout {
             speaking.setCompoundDrawables(mic, null, null, null);
             speaking.setCompoundDrawablePadding(theme.px(6));
         }
+        theme.styleText(hint, 14, 500, "onSurface");
+        hint.setTextColor(Color.WHITE);
+        GradientDrawable hintPill = new GradientDrawable();
+        hintPill.setCornerRadius(theme.px(14));
+        hintPill.setColor(0xCC202124);
+        hint.setBackground(hintPill);
+        hint.setPadding(theme.px(12), theme.px(5), theme.px(12), theme.px(5));
         theme.styleText(placeholder, 16, 400, "onSurfaceVariant");
         placeholder.setTextColor(0xFFBDBDBD);
         if (placeholder.getText().length() == 0) placeholder.setText(texts.connecting());
@@ -449,10 +508,12 @@ final class DoorbellView extends FrameLayout {
     }
 
     void update(State state, boolean speakerOn, boolean micOn) {
+        boolean changed = state != this.state;
         this.state = state;
         this.speakerOn = speakerOn;
         this.micOn = micOn;
         render();
+        if (changed) setControlsHidden(false);  // a new state shows what it offers, then hides again in a call
     }
 
     private void render() {
@@ -462,7 +523,7 @@ final class DoorbellView extends FrameLayout {
         speaking.setText(texts.microphoneActive());
         // The slider's room stays, so nothing jumps when the speaker turns on: not the picture in portrait, nor the cards
         // and buttons in the landscape column (whose button size already counts the slider).
-        volumeRow.setVisibility(speakerOn ? VISIBLE : INVISIBLE);
+        volumeRow.setVisibility(speakerOn && !controlsHidden ? VISIBLE : INVISIBLE);
         // Every position keeps one job: left (top) answers, then is the microphone; middle is the speaker; right
         // (bottom) hangs up.
         // Speaker and microphone are toggles: the same icon and label, the circle shows whether they are on.
@@ -569,7 +630,23 @@ final class DoorbellView extends FrameLayout {
         for (CardHolder holder : cardHolders) holder.cancel();
         cardHolders.clear();
         cardBox.removeAllViews();
-        cardBox.setVisibility(cards.isEmpty() ? GONE : VISIBLE);
+        cardBox.setVisibility(cards.isEmpty() ? GONE : controlsHidden ? INVISIBLE : VISIBLE);
+        if (overlay) {
+            // One row of round buttons, as on Apple Home's camera view: the icon's colour carries the state.
+            LinearLayout row = new LinearLayout(getContext());
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_HORIZONTAL);
+            cardBox.addView(row, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            for (int i = 0; i < cards.size(); i++) {
+                CardHolder holder = new CardHolder(getContext(), cards.get(i), true);
+                cardHolders.add(holder);
+                LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(theme.px(ROUND_CARD_DP), theme.px(ROUND_CARD_DP));
+                if (i > 0) params.leftMargin = theme.px(16);
+                row.addView(holder.root, params);
+                holder.render();
+            }
+            return;
+        }
         int gap = theme.px(landscape ? 8 : 12);
         // Landscape: one per row in the column. Portrait: two per row, always half wide; an odd last one is centred.
         int perRow = landscape ? 1 : 2;
@@ -584,7 +661,7 @@ final class DoorbellView extends FrameLayout {
                 if (i > 0) rowParams.topMargin = gap;
                 cardBox.addView(row, rowParams);
             }
-            CardHolder holder = new CardHolder(getContext(), cards.get(i));
+            CardHolder holder = new CardHolder(getContext(), cards.get(i), false);
             cardHolders.add(holder);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, theme.px(64), 1);
             if (i % perRow > 0) params.leftMargin = gap;
@@ -606,19 +683,33 @@ final class DoorbellView extends FrameLayout {
         }
     }
 
-    /** One card, like Home Assistant's tile: a tinted icon circle, the label and the state. */
+    /** One card, like Home Assistant's tile: a tinted icon circle, the label and the state; or only the circle. */
     private final class CardHolder {
         final Cards.Card card;
         final HoldFrame root;
         final ImageView icon;
         final GradientDrawable circle = new GradientDrawable();
         final TextView label, state;
+        final boolean round;  // the overlay's round button: no label or state, feedback goes to the hint
         private String feedback;
         private final Runnable clearFeedback = () -> feedback(null);
 
-        CardHolder(Context context, Cards.Card card) {
+        CardHolder(Context context, Cards.Card card, boolean round) {
             this.card = card;
+            this.round = round;
             root = new HoldFrame(context);
+            if (round) {
+                root.round = true;
+                root.setGravity(Gravity.CENTER);
+                circle.setShape(GradientDrawable.OVAL);
+                root.setBackground(circle);
+                icon = new ImageView(context);
+                icon.setScaleType(ImageView.ScaleType.CENTER);
+                root.addView(icon, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
+                label = state = null;
+                listen(card);
+                return;
+            }
             root.setOrientation(LinearLayout.HORIZONTAL);
             root.setGravity(Gravity.CENTER_VERTICAL);
             // The landscape column is narrow: a smaller circle and text leave the label room.
@@ -650,6 +741,10 @@ final class DoorbellView extends FrameLayout {
             LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
             textParams.leftMargin = theme.px(compact ? 8 : 12);
             root.addView(texts, textParams);
+            listen(card);
+        }
+
+        private void listen(Cards.Card card) {
             if (!card.action) return;
             if (card.confirm) {
                 root.hold = () -> safely(() -> callback.cardPressed(card));
@@ -661,11 +756,25 @@ final class DoorbellView extends FrameLayout {
 
         void render() {
             Cards.Look look = Cards.look(card, snapshots.get(card.entityId), texts);
+            int accent = tintColor(look.tint);
+            if (round) {
+                circle.setColor(0xB3202124);
+                if (look.tint == Cards.Tint.NONE) circle.setStroke(0, 0);
+                else circle.setStroke(theme.px(2), accent);
+                Drawable drawable = DoorbellView.this.icon(look.icon);
+                if (drawable == null) drawable = DoorbellView.this.icon(card.action ? "mdi:gesture-tap" : "mdi:eye");
+                if (drawable != null) {
+                    drawable.setTint(accent);
+                    icon.setImageDrawable(drawable);
+                }
+                root.setAlpha(look.unavailable || RUNNING.equals(feedback) ? 0.5f : 1f);
+                root.setContentDescription(look.label + (look.state.isEmpty() ? "" : ", " + look.state));
+                return;
+            }
             label.setText(look.label);
             String shown = feedback != null ? feedback : look.state;
             state.setText(shown);
             state.setVisibility(shown.isEmpty() ? GONE : VISIBLE);
-            int accent = tintColor(look.tint);
             circle.setColor(look.tint == Cards.Tint.NONE ? 0x26FFFFFF : (accent & 0x00FFFFFF) | 0x40000000);
             Drawable drawable = DoorbellView.this.icon(look.icon);
             if (drawable == null) drawable = DoorbellView.this.icon(card.action ? "mdi:gesture-tap" : "mdi:eye");
@@ -682,6 +791,7 @@ final class DoorbellView extends FrameLayout {
             root.removeCallbacks(clearFeedback);
             if (text != null) root.postDelayed(clearFeedback, text.equals(RUNNING) ? STATE_WAIT_MILLIS : FEEDBACK_MILLIS);
             render();
+            if (round) showHint(text == null || text.equals(RUNNING) ? null : Cards.look(card, snapshots.get(card.entityId), texts).label + ": " + text);
         }
 
         void cancel() {
@@ -693,6 +803,7 @@ final class DoorbellView extends FrameLayout {
     /** A card that runs only when held: a fill sweeps across it, and lifting the finger early cancels. */
     private final class HoldFrame extends LinearLayout {
         Runnable hold, tooShort;
+        boolean round;
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF bounds = new RectF();
         private ValueAnimator animator;
@@ -750,7 +861,7 @@ final class DoorbellView extends FrameLayout {
 
         @Override protected void dispatchDraw(Canvas canvas) {
             if (progress > 0) {
-                float radius = theme.px(16);
+                float radius = round ? getHeight() / 2f : theme.px(16);
                 bounds.set(0, 0, getWidth() * progress, getHeight());
                 canvas.save();
                 canvas.clipRect(bounds);
@@ -763,8 +874,74 @@ final class DoorbellView extends FrameLayout {
     }
 
     @Override public boolean onInterceptTouchEvent(MotionEvent event) {
-        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) safely(callback::touched);
+        if (event.getActionMasked() != MotionEvent.ACTION_DOWN) return false;
+        safely(callback::touched);
+        if (controlsHidden && !inside(buttons, event)) {
+            setControlsHidden(false);  // the first tap only brings the controls back; the call buttons always work
+            return true;
+        }
+        scheduleHide();
         return false;
+    }
+
+    private static boolean inside(View view, MotionEvent event) {
+        int[] at = new int[2];
+        view.getLocationOnScreen(at);
+        float x = event.getRawX(), y = event.getRawY();
+        return x >= at[0] && x < at[0] + view.getWidth() && y >= at[1] && y < at[1] + view.getHeight();
+    }
+
+    /** The overlay hides the name, the cards and the slider during a call, never the call buttons or the chip. */
+    private void setControlsHidden(boolean hidden) {
+        removeCallbacks(hideControls);
+        boolean can = overlay && state != State.RINGING;
+        hidden = hidden && can;
+        if (hidden != controlsHidden) {
+            controlsHidden = hidden;
+            for (View view : new View[] {title, cardBox, volumeRow, hint}) fade(view, !hidden);
+            if (topBox.getBackground() != null) topBox.getBackground().setAlpha(hidden ? 0 : 255);
+            if (!hidden) render();
+        }
+        if (!hidden) scheduleHide();
+    }
+
+    private void scheduleHide() {
+        removeCallbacks(hideControls);
+        if (overlay && state != State.RINGING && !controlsHidden) postDelayed(hideControls, HIDE_MILLIS);
+    }
+
+    private void fade(View view, boolean show) {
+        if (view.getVisibility() == GONE) return;
+        view.animate().cancel();
+        if (show) {
+            if (view == volumeRow && !speakerOn) return;
+            view.setVisibility(VISIBLE);
+            view.setAlpha(0f);
+            view.animate().alpha(1f).setDuration(200).start();
+        } else {
+            view.animate().alpha(0f).setDuration(300).withEndAction(() -> {
+                view.setVisibility(INVISIBLE);
+                view.setAlpha(1f);
+            }).start();
+        }
+    }
+
+    private final Runnable hideHint = this::hideHintNow;
+
+    private void hideHintNow() {
+        hint.setVisibility(GONE);
+    }
+
+    /** A round card's feedback, such as "Front door: Hold to run", for a moment above the row; null hides it. */
+    private void showHint(String text) {
+        removeCallbacks(hideHint);
+        if (text == null) {
+            hint.setVisibility(GONE);
+            return;
+        }
+        hint.setText(text);
+        hint.setVisibility(VISIBLE);
+        postDelayed(hideHint, FEEDBACK_MILLIS);
     }
 
     /** Click handlers run outside the host's guards: an exception there would end the app. */
