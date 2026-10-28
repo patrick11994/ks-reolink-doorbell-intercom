@@ -260,11 +260,12 @@ final class DoorbellView extends FrameLayout {
                 cardSide.addView(cardBox, new ScrollView.LayoutParams(fill, wrap));
                 addView(cardSide, new LayoutParams(columnPx, LayoutParams.MATCH_PARENT, Gravity.START));
             }
-            // The speaking chip floats at the top middle of the picture, on one line: the screen's middle with cards.
+            // The speaking chip floats at the top middle of the picture, on one line.
             LayoutParams chip = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
             chip.topMargin = theme.px(12);
-            chip.leftMargin = videoParams.leftMargin;
-            chip.rightMargin = videoParams.rightMargin;
+            // A centred child moves by its whole left margin minus its right one, so half of each centres it on the picture.
+            chip.leftMargin = videoParams.leftMargin / 2;
+            chip.rightMargin = videoParams.rightMargin / 2;
             addView(speaking, chip);
         } else {
             topBox.addView(title, new LinearLayout.LayoutParams(fill, wrap));
@@ -459,8 +460,9 @@ final class DoorbellView extends FrameLayout {
         title.setText(name);
         speaking.setVisibility(state == State.IN_CALL && micOn ? VISIBLE : GONE);
         speaking.setText(texts.microphoneActive());
-        // Portrait keeps the slider's room, so the picture does not jump when the speaker turns on.
-        volumeRow.setVisibility(speakerOn ? VISIBLE : landscape ? GONE : INVISIBLE);
+        // The slider's room stays, so nothing jumps when the speaker turns on: not the picture in portrait, nor the cards
+        // and buttons in the landscape column (whose button size already counts the slider).
+        volumeRow.setVisibility(speakerOn ? VISIBLE : INVISIBLE);
         // Every position keeps one job: left (top) answers, then is the microphone; middle is the speaker; right
         // (bottom) hangs up.
         // Speaker and microphone are toggles: the same icon and label, the circle shows whether they are on.
