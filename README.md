@@ -145,7 +145,7 @@ The card's colour follows the state the way Home Assistant does: a light that is
 | The door hears itself (echo or a feedback loop) | Set **Microphone** to *Voice communication*, and keep **Android call mode** on |
 | Sound or the microphone stops working in a call | Turn off **Android call mode** |
 | The chime is too quiet | Raise **Chime volume**. If it is still quiet, set **Chime sound** to *Media*, the volume most tablets show, or to *Alarm*. |
-| The picture stays black, but sound works | The device cannot decode the main stream. Set **Video** to *Sub*. |
+| The picture stays black, but sound works | Try **Video** set to *Sub*. If it stays black, the Logs' *video decoder:* lines name the decoder, what the stream declares and where decoding failed: please add them to an issue. |
 | A card shows *Unavailable* | Check Kiosk Satellite's Home Assistant connection, and that the entity still exists |
 | A card does nothing | Check its **Action**. The Logs say what happened (*card: … failed: …*). |
 | You hear nothing with Speaker on | Raise the slider on the call screen. It sets Android's call volume, which is separate from the media volume. |
