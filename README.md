@@ -12,6 +12,10 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 |:---:|:---:|:---:|
 | <img src="docs/screenshot-ringing.jpg" alt="The call screen while it rings: the doorbell's live video, a Lights and a Front door card, and Answer, Speaker and Hang up" width="220"> | <img src="docs/screenshot-in-call.jpg" alt="In a call: Microphone active, the cards, the volume slider, and Microphone, Speaker and End call" width="220"> | <img src="docs/screenshot-landscape.jpg" alt="The call screen on a landscape tablet: the video, with the cards above the controls on the right" width="352"> |
 
+| Small square screen, ringing | Small square screen, in a call |
+|:---:|:---:|
+| <img src="docs/screenshot-square-ringing.jpg" alt="On a small square screen: the video fills the screen, with the cards as round buttons above Answer, Speaker and Hang up" width="240"> | <img src="docs/screenshot-square-call.jpg" alt="In a call on a small square screen: the controls have faded out, leaving the video and Microphone active" width="240"> |
+
 *The picture is blurred on purpose.*
 
 *Not affiliated with or endorsed by Reolink or the Kiosk Satellite project. Reolink is a trademark of its owner.*
@@ -115,7 +119,7 @@ Each card has these fields. It needs an action, an entity or both.
 | **Action** | What a tap does, picked with the same chooser as Gestures: a Home Assistant service, script or automation, a dashboard view, and the rest. Optional: without one, the card only shows the state. |
 | **Hold to run** | Runs the action only after you hold the card for a moment, for a door or a gate |
 
-The card's colour follows the state the way Home Assistant does: a light that is on is amber, a locked lock or an armed alarm green, an unlocked lock or a triggered alarm red, and a state that is changing orange. An entity that Home Assistant does not have, or that is unreachable, shows dimmed as *Unavailable*, never as off. In portrait the cards sit above the call buttons, two to a row. In landscape they go above the call buttons too when the screen is tall enough, which gives the picture more room, and get their own column on the left otherwise.
+The card's colour follows the state the way Home Assistant does: a light that is on is amber, a locked lock or an armed alarm green, an unlocked lock or a triggered alarm red, and a state that is changing orange. An entity that Home Assistant does not have, or that is unreachable, shows dimmed as *Unavailable*, never as off. In portrait the cards sit above the call buttons, two to a row. In landscape they go above the call buttons too when the screen is tall enough, which gives the picture more room, and get their own column on the left otherwise. On a small, nearly square screen, such as an NSPanel Pro, the picture fills the screen and the cards become a row of round buttons: an active state fills the button, an inactive one is a ring, and the icon follows the state, so it never depends on colour alone. During a call there, all controls fade out a second after you answer, as in a video call app; tap the screen to bring them back.
 
 ## Good to know
 
