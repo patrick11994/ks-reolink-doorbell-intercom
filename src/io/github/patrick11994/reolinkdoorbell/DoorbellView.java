@@ -207,8 +207,9 @@ final class DoorbellView extends FrameLayout {
     private int buttonDpFor(boolean wide, int heightPx) {
         if (!wide) return 76;
         float density = getResources().getDisplayMetrics().density;
-        float available = heightPx / density - 54 - 48 - 64;  // the name, the column's padding, the volume slider
-        return Math.max(56, Math.min(76, Math.round(available / 3 - 36)));  // each button: circle + 16 ring + 20 label
+        // The name, the column's padding, the volume slider and the speaking chip, which wraps to two lines there.
+        float available = heightPx / density - 54 - 48 - 64 - 60;
+        return Math.max(48, Math.min(76, Math.round(available / 3 - 36)));  // each button: circle + 16 ring + 20 label
     }
 
     /** Places the name, chip, slider and buttons for portrait or landscape. */
@@ -256,6 +257,8 @@ final class DoorbellView extends FrameLayout {
         if (landscape) return;
         LayoutParams params = (LayoutParams) video.getLayoutParams();
         int top = topBox.getHeight(), bottom = bottomBox.getHeight();
+        // A screen too low for both (a small square one) gets the picture behind the controls, as before the cards.
+        if (getHeight() - top - bottom < getHeight() / 3) top = bottom = 0;
         if (params.topMargin == top && params.bottomMargin == bottom) return;
         params.topMargin = top;
         params.bottomMargin = bottom;
@@ -566,7 +569,9 @@ final class DoorbellView extends FrameLayout {
             root = new HoldFrame(context);
             root.setOrientation(LinearLayout.HORIZONTAL);
             root.setGravity(Gravity.CENTER_VERTICAL);
-            root.setPadding(theme.px(12), 0, theme.px(12), 0);
+            // The landscape column is narrow: a smaller circle and text leave the label room.
+            boolean compact = landscape;
+            root.setPadding(theme.px(compact ? 8 : 12), 0, theme.px(compact ? 8 : 12), 0);
             GradientDrawable background = new GradientDrawable();
             background.setCornerRadius(theme.px(16));
             background.setColor(0x26FFFFFF);
@@ -575,23 +580,23 @@ final class DoorbellView extends FrameLayout {
             icon = new ImageView(context);
             icon.setBackground(circle);
             icon.setScaleType(ImageView.ScaleType.CENTER);
-            root.addView(icon, new LinearLayout.LayoutParams(theme.px(40), theme.px(40)));
+            root.addView(icon, new LinearLayout.LayoutParams(theme.px(compact ? 32 : 40), theme.px(compact ? 32 : 40)));
             LinearLayout texts = new LinearLayout(context);
             texts.setOrientation(LinearLayout.VERTICAL);
             label = new TextView(context);
-            theme.styleText(label, 15, 600, "onSurface");
+            theme.styleText(label, compact ? 14 : 15, 600, "onSurface");
             label.setTextColor(Color.WHITE);
             label.setSingleLine(true);
             label.setEllipsize(android.text.TextUtils.TruncateAt.END);
             state = new TextView(context);
-            theme.styleText(state, 13, 400, "onSurfaceVariant");
+            theme.styleText(state, compact ? 12 : 13, 400, "onSurfaceVariant");
             state.setTextColor(0xFFBDBDBD);
             state.setSingleLine(true);
             state.setEllipsize(android.text.TextUtils.TruncateAt.END);
             texts.addView(label);
             texts.addView(state);
             LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-            textParams.leftMargin = theme.px(12);
+            textParams.leftMargin = theme.px(compact ? 8 : 12);
             root.addView(texts, textParams);
             if (!card.action) return;
             if (card.confirm) {
