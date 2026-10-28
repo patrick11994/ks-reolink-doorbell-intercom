@@ -10,7 +10,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 
 | Ringing | In a call | Landscape |
 |:---:|:---:|:---:|
-| <img src="docs/screenshot-ringing.jpg" alt="The call screen while it rings: the doorbell's live video, a Porch light and a Front door card, and Answer, Speaker and Hang up" width="220"> | <img src="docs/screenshot-in-call.jpg" alt="In a call: Microphone active, the cards, the volume slider, and Microphone, Speaker and End call" width="220"> | <img src="docs/screenshot-landscape.jpg" alt="The call screen on a landscape screen: the cards on the left, the video in the middle and the controls on the right" width="352"> |
+| <img src="docs/screenshot-ringing.jpg" alt="The call screen while it rings: the doorbell's live video, a Lights and a Front door card, and Answer, Speaker and Hang up" width="220"> | <img src="docs/screenshot-in-call.jpg" alt="In a call: Microphone active, the cards, the volume slider, and Microphone, Speaker and End call" width="220"> | <img src="docs/screenshot-landscape.jpg" alt="The call screen on a landscape screen: the cards on the left, the video in the middle and the controls on the right" width="352"> |
 
 *The picture is blurred on purpose.*
 
