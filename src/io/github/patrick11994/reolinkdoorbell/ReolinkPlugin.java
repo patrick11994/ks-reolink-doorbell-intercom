@@ -7,8 +7,12 @@ import android.view.View;
 import java.text.SimpleDateFormat;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -35,6 +39,7 @@ import io.github.patrick11994.reolinkdoorbell.talk.TalkChannel;
  */
 public final class ReolinkPlugin implements KioskPlugin, RingController.Actions {
     static final String OVERLAY = "doorbell";
+    private static final String ENTITY_EVENT = "ks.ha.entity.";
 
     private volatile PluginHost host;
     private volatile Settings settings;
@@ -57,6 +62,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private CallMode callMode;
     private long ringAt;
     private volatile long countdownStart, countdownMillis;  // shown by the viewer, also one created later
+    // The cards' Home Assistant entities: followed only while the viewer is open.
+    private final Set<String> followed = new HashSet<>();  // guarded by itself
+    private final Map<String, Map<?, ?>> snapshots = new ConcurrentHashMap<>();
+    private volatile boolean viewerOpen;
 
     @Override public void start(PluginHost host, Map<String, Object> values) {
         this.host = host;
@@ -124,6 +133,12 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             c.setMaxCallMillis(settings.maxCallMillis);
         }
         if (previous == null || !previous.sameConnection(settings)) connect();
+        if (viewerOpen) {
+            followCards(settings.cards);
+            DoorbellView v = view;
+            List<Cards.Card> cards = settings.cards;
+            if (v != null) v.post(() -> v.setCards(cards));
+        }
     }
 
     @Override public void execute(String command, Map<String, Object> arguments) {
@@ -140,6 +155,13 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     @Override public void onEvent(String event, Map<String, Object> payload) {
         if ("settings.button".equals(event) && "check".equals(payload.get("id"))) {
             check(String.valueOf(payload.get("run")));
+            return;
+        }
+        if (event.startsWith(ENTITY_EVENT)) {
+            String entityId = event.substring(ENTITY_EVENT.length());
+            snapshots.put(entityId, payload);
+            DoorbellView v = view;
+            if (v != null) v.post(() -> v.entityChanged(entityId, payload));
             return;
         }
         if ("overlay.closed".equals(event) && OVERLAY.equals(payload.get("key"))) {
@@ -159,6 +181,11 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         if (t != null) t.shutdownNow();
         controller = null;
         view = null;
+        viewerOpen = false;
+        synchronized (followed) {
+            followed.clear();  // the session's subscriptions end with it
+        }
+        snapshots.clear();
         stopMedia();
     }
 
@@ -205,6 +232,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         log("viewer: open (" + (rang ? "ring" : "by hand") + ")");
         stopMedia();  // a fresh call: nothing from an earlier one may linger
         startStream();
+        viewerOpen = true;
+        followCards(settings.cards);
         h.showOverlay(OVERLAY, OverlaySpec.fullScreen().onTop(true).closeOnBack(true), new OverlayFactory() {
             @Override public View create(Context context, KsTheme theme) {
                 RingController c = controller;
@@ -223,7 +252,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                     @Override public void surfaceReady(Surface surface) { attachVideo(this, surface); }
                     @Override public void surfaceGone() { detachVideo(this); }
                     @Override public void volumeChanged(int percent, boolean done) { setCallVolume(percent, done); }
+                    @Override public void cardPressed(Cards.Card card) { runCard(card); }
                 });
+                for (Map.Entry<String, Map<?, ?>> known : snapshots.entrySet()) created.entityChanged(known.getKey(), known.getValue());
+                created.setCards(settings.cards);
                 if (c != null) created.update(c.state(), c.speakerOn(), c.micOn());
                 created.setCountdown(countdownStart, countdownMillis);
                 view = created;
@@ -258,7 +290,63 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         if (m != null) m.setActive(false);
         PluginHost h = host;
         if (h != null) h.hideOverlay(OVERLAY);
+        viewerOpen = false;
+        followCards(Collections.<Cards.Card>emptyList());
         stopMedia();
+    }
+
+    // The cards
+
+    /** Follows exactly the cards' entities; KS sends each one's current state first, then every change. */
+    private void followCards(List<Cards.Card> cards) {
+        PluginHost h = host;
+        Set<String> wanted = new HashSet<>();
+        for (Cards.Card card : cards) if (card.hasEntity()) wanted.add(card.entityId);
+        synchronized (followed) {
+            for (String entityId : new HashSet<>(followed)) {
+                if (wanted.contains(entityId)) continue;
+                followed.remove(entityId);
+                snapshots.remove(entityId);
+                try {
+                    if (h != null) h.unsubscribe("ha.entity." + entityId);
+                } catch (RuntimeException gone) {
+                    // The session ended; its subscriptions went with it.
+                }
+            }
+            for (String entityId : wanted) {
+                if (followed.contains(entityId) || h == null) continue;
+                try {
+                    h.subscribe("ha.entity." + entityId);
+                    followed.add(entityId);
+                } catch (RuntimeException refused) {
+                    log("card: cannot follow " + entityId + ": " + refused.getMessage());
+                }
+            }
+        }
+    }
+
+    /** Runs the action the user chose for the card, and shows on the card how it went. */
+    private void runCard(Cards.Card card) {
+        PluginHost h = host;
+        DoorbellView v = view;
+        if (h == null || !card.action) return;
+        Texts t = texts;
+        if (v != null) v.cardFeedback(card, "…");
+        try {
+            h.runAction(card.actionPath(), (ok, data, error) -> {
+                log("card: " + (card.label.isEmpty() ? card.actionPath() : card.label) + (ok ? " ran" : " failed: " + error));
+                DoorbellView now = view;
+                // With a state to follow, the state itself confirms it; otherwise say it is done.
+                String shown = ok ? (card.hasEntity() ? null : t.cardDone()) : t.cardFailed();
+                if (now != null) now.post(() -> now.cardFeedback(card, shown));
+            });
+        } catch (UnsupportedOperationException older) {
+            log("card: this Kiosk Satellite version cannot run actions");
+            if (v != null) v.cardFeedback(card, t.cardsNeedNewerKs());
+        } catch (RuntimeException refused) {
+            log("card: " + refused.getMessage());
+            if (v != null) v.cardFeedback(card, t.cardFailed());
+        }
     }
 
     @Override public synchronized void setAudio(boolean speakerOn, boolean micOn) {
@@ -552,6 +640,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         final boolean chime, wakeScreen, wakeWordRestore, callMode;
         final long autoCloseMillis, maxCallMillis;
         final int callVolume, chimeVolume;
+        final List<Cards.Card> cards;
 
         Settings(Map<String, Object> values) {
             host = string(values, "host");
@@ -582,6 +671,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             streamPath = string(values, "stream").startsWith("Sub") ? "/h264Preview_01_sub" : "/h264Preview_01_main";
             Object volume = values.get("callVolume");
             callVolume = volume instanceof Number ? Math.max(0, Math.min(100, ((Number) volume).intValue())) : 70;
+            cards = Cards.parse(values.get("cards"));
         }
 
         /** The doorbell's name for the viewer, or the translated default. */

@@ -40,6 +40,47 @@ final class Texts {
     String noMicrophone() { return t("No working microphone found", "Geen werkende microfoon gevonden"); }
     String defaultName() { return t("Front door", "Voordeur"); }
 
+    // Cards
+    String cardAction() { return t("Action", "Actie"); }
+    String holdToRun() { return t("Hold to run", "Ingedrukt houden"); }
+    String cardDone() { return t("Done", "Gedaan"); }
+    String cardFailed() { return t("Failed", "Mislukt"); }
+    String cardsNeedNewerKs() { return t("Needs a newer Kiosk Satellite", "Vereist een nieuwere Kiosk Satellite"); }
+    String unavailable() { return t("Unavailable", "Niet beschikbaar"); }
+    String unknown() { return t("Unknown", "Onbekend"); }
+    String stateOn() { return t("On", "Aan"); }
+    String stateOff() { return t("Off", "Uit"); }
+    String stateOpen() { return t("Open", "Open"); }
+    String stateClosed() { return t("Closed", "Dicht"); }
+    String stateDetected() { return t("Detected", "Gedetecteerd"); }
+    String stateClear() { return t("Clear", "Niets"); }
+
+    /** Lock, alarm and cover states, or null for one without its own text. */
+    String haState(String state) {
+        switch (state) {
+            case "locked": return t("Locked", "Op slot");
+            case "unlocked": return t("Unlocked", "Van het slot");
+            case "locking": return t("Locking…", "Op slot doen…");
+            case "unlocking": return t("Unlocking…", "Openen…");
+            case "jammed": return t("Jammed", "Klemt");
+            case "open": return stateOpen();
+            case "opening": return t("Opening…", "Openen…");
+            case "closed": return stateClosed();
+            case "closing": return t("Closing…", "Sluiten…");
+            case "disarmed": return t("Disarmed", "Uitgeschakeld");
+            case "armed_home": return t("Armed home", "Thuis ingeschakeld");
+            case "armed_away": return t("Armed away", "Afwezig ingeschakeld");
+            case "armed_night": return t("Armed night", "Nacht ingeschakeld");
+            case "armed_vacation": return t("Armed vacation", "Vakantie ingeschakeld");
+            case "armed_custom_bypass": return t("Armed custom", "Aangepast ingeschakeld");
+            case "arming": return t("Arming…", "Inschakelen…");
+            case "disarming": return t("Disarming…", "Uitschakelen…");
+            case "pending": return t("Pending…", "Wachten…");
+            case "triggered": return t("Triggered", "Alarm");
+            default: return null;
+        }
+    }
+
     // Readings and status
     String connectionReading() { return t("Doorbell connection", "Verbinding met deurbel"); }
     String lastRingReading() { return t("Last ring", "Laatst aangebeld"); }
