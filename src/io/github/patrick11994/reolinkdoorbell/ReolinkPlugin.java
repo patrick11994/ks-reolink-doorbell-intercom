@@ -57,6 +57,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private AudioRenderer audioRenderer;
     private TalkChannel talk;
     private BaichuanTalk baichuanTalk;  // the Baichuan part of talk, for its encoder load
+    private boolean talkFromRing;  // ONVIF: talk opens at the ring and stays; Baichuan only while the microphone is on
     private MicCapture mic;
     private CallVolume callVolume;
     private CallMode callMode;
@@ -373,7 +374,11 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             releaseLater(audioRenderer::release);
             audioRenderer = null;
         }
-        if (micOn && mic == null && talk != null) {
+        if (micOn && mic == null && stream != null) {
+            if (talk == null) {
+                talk = openTalk(settings);
+                talk.start();
+            }
             mic = new MicCapture(talk, settings.microphone, settings.micRate, state -> {
                 log("microphone: " + state);
                 if (!state.startsWith("live")) showMessage(texts.noMicrophone());
@@ -381,7 +386,15 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         } else if (!micOn && mic != null) {
             releaseLater(mic::release);
             mic = null;
-            if (talk != null) talk.clear();
+            if (talk != null && talkFromRing) {
+                talk.clear();
+            } else if (talk != null) {
+                // Gives the doorbell's speaker back (TalkReset), for its own sounds and a Quick Reply.
+                logTalk();
+                releaseLater(talk::stop);
+                talk = null;
+                baichuanTalk = null;
+            }
         }
     }
 
@@ -421,10 +434,15 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         publishText("first_frame", texts.firstPictureReading(), texts.waiting());
         stream = openStream(s);
         stream.start();
-        // Talking: open the talk channel now and stream silence, so the doorbell's playout buffer is full by the time
-        // anyone presses Answer (it drops audio while that buffer fills).
-        talk = openTalk(s);
-        talk.start();
+        // ONVIF talk opens now and streams silence, so the doorbell's 2 s playout buffer is full by the time anyone
+        // presses Answer (it drops audio while that buffer fills). Baichuan talk sets up in about 0.2 s, so it waits
+        // for the microphone: an open talk session holds the doorbell's speaker, which would cut the doorbell's own
+        // ring tone and refuse a Quick Reply.
+        talkFromRing = s.talkPath.equals("ONVIF");
+        if (talkFromRing) {
+            talk = openTalk(s);
+            talk.start();
+        }
     }
 
     /**
@@ -541,8 +559,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }
         log("media: stop (stream " + (stream != null) + ", video " + (videoRenderer != null) + ", audio " + (audioRenderer != null)
             + ", talk " + (talk != null) + ", microphone " + (mic != null) + ")");
-        BaichuanTalk bt = baichuanTalk;
-        if (bt != null && bt.blocksSent() > 0) log(String.format(Locale.ROOT, "talk: %d Baichuan blocks sent, encoder load %.1f%%", bt.blocksSent(), 100 * bt.encodeLoad()));
+        logTalk();
         final MediaStream oldStream = stream;
         final VideoRenderer oldVideo = videoRenderer;
         final AudioRenderer oldAudio = audioRenderer;
@@ -570,6 +587,11 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }, "reolink-cleanup");
         cleanup.setDaemon(true);
         cleanup.start();
+    }
+
+    private void logTalk() {
+        BaichuanTalk bt = baichuanTalk;
+        if (bt != null && bt.blocksSent() > 0) log(String.format(Locale.ROOT, "talk: %d Baichuan blocks sent, encoder load %.1f%%", bt.blocksSent(), 100 * bt.encodeLoad()));
     }
 
     private void setCallVolume(int percent, boolean done) {
