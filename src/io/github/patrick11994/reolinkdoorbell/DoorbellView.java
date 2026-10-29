@@ -240,7 +240,9 @@ final class DoorbellView extends FrameLayout {
 
     /** The landscape column's height left for the buttons and cards: less the name, the padding, the volume slider. */
     private float columnSpareDp(int heightPx) {
-        return heightPx / getResources().getDisplayMetrics().density - 54 - 48 - 64;
+        // In Kiosk Satellite's own dp, which everything here is drawn in: its UI scale can be larger than Android's
+        // density (an Echo Show), and buttons sized in Android's dp then ran off the bottom of the column.
+        return heightPx / (theme.px(1000) / 1000f) - 54 - 48 - 64;
     }
 
     private float cardsDp() {
