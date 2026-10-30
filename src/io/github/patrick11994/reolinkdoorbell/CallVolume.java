@@ -11,6 +11,7 @@ import android.media.AudioManager;
 final class CallVolume {
     private final AudioManager audio;
     private int previous = -1;
+    private int reached = 100;  // what Android set the call volume to, in percent, after the last apply
 
     CallVolume(Context context) {
         audio = (AudioManager) context.getApplicationContext().getSystemService(Context.AUDIO_SERVICE);
@@ -22,6 +23,7 @@ final class CallVolume {
      * image), so the plugin can turn its own playback down instead.
      */
     synchronized String apply(int percent) {
+        reached = 100;  // a fixed or refused volume: taken as playing as is
         try {
             if (previous < 0) previous = audio.getStreamVolume(AudioManager.STREAM_VOICE_CALL);
             int max = audio.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL);
@@ -30,10 +32,16 @@ final class CallVolume {
             if (audio.isVolumeFixed()) return "fixed";
             audio.setStreamVolume(AudioManager.STREAM_VOICE_CALL, index, 0);
             int now = audio.getStreamVolume(AudioManager.STREAM_VOICE_CALL);
+            if (max > 0) reached = Math.round(100f * now / max);
             return now == index ? null : now + " of " + max + " instead of " + index;
         } catch (RuntimeException refused) {
             return "refused (" + refused.getMessage() + ")";  // Do Not Disturb, for one
         }
+    }
+
+    /** The call volume Android ended up at after the last apply, 0 to 100 percent. */
+    synchronized int reachedPercent() {
+        return reached;
     }
 
     /** Puts back the level from before the call. */

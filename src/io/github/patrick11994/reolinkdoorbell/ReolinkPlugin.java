@@ -663,7 +663,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private synchronized void applyCallVolume(int percent, boolean report) {
         CallVolume volume = callVolume;
         String refused = volume == null ? "unavailable" : volume.apply(percent);
-        if (audioRenderer != null) audioRenderer.setGain(refused == null ? 1f : Loudness.gain(percent));
+        if (audioRenderer != null) audioRenderer.setGain(refused == null ? 1f : Loudness.remaining(percent, volume == null ? 100 : volume.reachedPercent()));
         if (report) {
             log(refused == null ? "audio: call volume " + percent + "%"
                 : "audio: call volume " + percent + "%, played by the plugin: Android's call volume " + refused);
