@@ -17,8 +17,10 @@ public final class AacDepacketizer {
 
     public AacDepacketizer(Sink sink, int sizeLength, int indexLength) {
         this.sink = sink;
-        this.sizeLength = sizeLength <= 0 ? 13 : sizeLength;
-        this.indexLength = indexLength < 0 ? 3 : indexLength;
+        // The SDP comes from the network: a size field wider than 16 bits would let one packet claim a frame of gigabytes.
+        boolean usable = sizeLength >= 1 && sizeLength <= 16 && indexLength >= 0 && indexLength <= 16;
+        this.sizeLength = usable ? sizeLength : 13;
+        this.indexLength = usable ? indexLength : 3;
     }
 
     public void onRtp(byte[] packet, int offset, int length) {
@@ -38,7 +40,7 @@ public final class AacDepacketizer {
         int count = bitsPerHeader == 0 ? 0 : headerBits / bitsPerHeader;
         for (int i = 0; i < count; i++) {
             int size = bits(packet, headerStart, i * bitsPerHeader, sizeLength);
-            if (size <= 0 || data + size > end) return;
+            if (size <= 0 || size > end - data) return;
             byte[] frame = new byte[size];
             System.arraycopy(packet, data, frame, 0, size);
             sink.onAacFrame(frame, ts + (long) i * samplesPerFrame);
