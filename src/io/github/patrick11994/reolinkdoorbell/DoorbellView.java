@@ -625,7 +625,19 @@ final class DoorbellView extends FrameLayout {
         if (landscape && columnLevel >= 1) evenLabelsWhenLaidOut();
     }
 
-    private static final String CAPTION = "caption";
+    /** Every text a button's place shows in any state, so its label gets one size from the ring through the call. */
+    private String[] placeTexts(String label) {
+        String[][] places = {
+            {texts.answer(), texts.microphone(), texts.holdToTalk()},
+            {texts.hangUp(), texts.endCall()},
+            {texts.speaker()},
+        };
+        for (String[] place : places) {
+            for (String text : place) if (text.equals(label)) return pushToTalk && place[0].equals(texts.answer()) ? new String[] {texts.holdToTalk()} : place;
+        }
+        return new String[] {label};
+    }
+
     private static final float CAPTION_SP = 14, MIN_CAPTION_SP = 9;
 
     /**
@@ -645,7 +657,8 @@ final class DoorbellView extends FrameLayout {
             if (room <= 0) return;  // not laid out: nothing to measure
             paint.set(caption.getPaint());
             paint.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, CAPTION_SP, getResources().getDisplayMetrics()));
-            float needed = paint.measureText(caption.getText().toString());
+            float needed = 0;
+            for (String text : (String[]) caption.getTag()) needed = Math.max(needed, paint.measureText(text));
             // A little short of the exact fit: text laid out at exactly its room still loses its last letter.
             if (needed > room * 0.94f) scale = Math.min(scale, room * 0.94f / needed);
         }
@@ -665,7 +678,7 @@ final class DoorbellView extends FrameLayout {
     }
 
     private static void collectCaptions(View view, List<TextView> into) {
-        if (view instanceof TextView && CAPTION.equals(view.getTag())) into.add((TextView) view);
+        if (view instanceof TextView && view.getTag() instanceof String[]) into.add((TextView) view);
         if (view instanceof android.view.ViewGroup) {
             android.view.ViewGroup group = (android.view.ViewGroup) view;
             for (int i = 0; i < group.getChildCount(); i++) collectCaptions(group.getChildAt(i), into);
@@ -862,7 +875,7 @@ final class DoorbellView extends FrameLayout {
         caption.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         captionParams.topMargin = theme.px(2);
-        caption.setTag(CAPTION);
+        caption.setTag(placeTexts(label));
         if (landscape && columnLevel >= 1) {
             // Side by side in a narrow column: one line; evenLabels shrinks all of them alike if one does not fit.
             captionParams.width = LinearLayout.LayoutParams.MATCH_PARENT;
