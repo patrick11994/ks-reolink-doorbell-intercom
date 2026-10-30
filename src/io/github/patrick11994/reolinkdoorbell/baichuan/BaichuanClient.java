@@ -133,21 +133,25 @@ public final class BaichuanClient {
         connectedSince = System.currentTimeMillis();
         listener.onConnection(true, "connected");
         s.setSoTimeout(1000);
+        // Only what arrives counts as a sign of life: a write succeeds into the send buffer even when the doorbell is gone.
         long lastReceived = System.currentTimeMillis();
+        long lastSent = lastReceived;
         boolean pushesSeen = false;
         while (running) {
             BcMessage message;
             try {
                 message = trace(BcMessage.read(in));
             } catch (SocketTimeoutException quiet) {
-                if (System.currentTimeMillis() - lastReceived > keepaliveMillis) {
+                long now = System.currentTimeMillis();
+                if (now - Math.max(lastReceived, lastSent) > keepaliveMillis) {
                     // reolink_aio: LinkType (93) keeps a live subscription open; re-subscribing revives a silent one.
+                    // The doorbell answers both, so allow one interval for the answer before sending again.
                     int id = nextId(pushesSeen ? CHANNEL_HOST : CHANNEL_PUSH);
                     out.write(BcMessage.encodeModern(pushesSeen ? CMD_KEEPALIVE : CMD_SUBSCRIBE, id, new byte[0], new byte[0]));
                     out.flush();
-                    lastReceived = System.currentTimeMillis();  // allow one interval for the answer before sending again
+                    lastSent = now;
                 }
-                if (System.currentTimeMillis() - lastReceived > 3 * keepaliveMillis) throw new IOException("the doorbell stopped answering");
+                if (now - lastReceived > 3 * keepaliveMillis) throw new IOException("the doorbell stopped answering");
                 continue;
             }
             lastReceived = System.currentTimeMillis();

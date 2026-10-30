@@ -26,6 +26,7 @@ public final class BaichuanClientTest {
         cryptoMatchesReolinkAio();
         alarmParsing();
         loginSubscribeAndPush();
+        silentDoorbellIsNoticed();
         wrongPasswordIsReported();
         verifyChecksTheLogin();
         System.out.println("BaichuanClientTest passed");
@@ -73,6 +74,35 @@ public final class BaichuanClientTest {
             check(log.contains("connection true connected"), true);
             check(log.stream().anyMatch(l -> l.startsWith("keepalive")), true);
             check(Thread.getAllStackTraces().keySet().stream().noneMatch(t -> t.getName().equals("reolink-baichuan") && t.isAlive()), true);
+        }
+    }
+
+    /** A doorbell that logs in and then never answers again (power cut, no RST): the session must drop on its own. */
+    static void silentDoorbellIsNoticed() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            CountDownLatch dropped = new CountDownLatch(1);
+            List<String> log = new CopyOnWriteArrayList<>();
+            Thread doorbell = new Thread(() -> {
+                try (Socket socket = server.accept()) {
+                    DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+                    if (fakeLogin(in, socket.getOutputStream(), PASSWORD, log) == null) return;
+                    socket.setSoTimeout(3000);
+                    while (true) log.add("ignored cmd " + BcMessage.read(in).command);  // reads, never answers
+                } catch (Exception closed) {
+                    // The client gave up.
+                }
+            });
+            doorbell.start();
+            BaichuanClient client = new BaichuanClient("127.0.0.1", server.getLocalPort(), USER, PASSWORD, new BaichuanClient.Listener() {
+                @Override public void onConnection(boolean connected, String detail) { if (detail.contains("stopped answering")) dropped.countDown(); }
+                @Override public void onAlarm(AlarmEvents.Event event) {}
+            }, 200, 2000);
+            client.start();
+            boolean noticed = dropped.await(3, TimeUnit.SECONDS);
+            client.stop();
+            doorbell.join(3000);
+            check(noticed, true);
+            check(log.stream().filter(l -> l.startsWith("ignored")).count() >= 2, true);  // it did keep trying first
         }
     }
 
