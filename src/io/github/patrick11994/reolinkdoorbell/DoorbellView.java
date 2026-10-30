@@ -519,7 +519,7 @@ final class DoorbellView extends FrameLayout {
             canvas.drawOval(bounds, track);
             // From twelve o'clock, emptying clockwise as the time runs out.
             canvas.drawArc(bounds, -90 + 360 * (1 - remaining), 360 * remaining, false, progress);
-            if (remaining > 0) postInvalidateOnAnimation();
+            if (remaining > 0) postInvalidateDelayed(100);  // a minute-long sweep: ten steps a second look smooth, at every frame it kept the GPU busy
         }
     }
 
