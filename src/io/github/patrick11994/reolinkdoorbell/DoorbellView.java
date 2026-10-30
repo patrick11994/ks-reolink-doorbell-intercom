@@ -57,6 +57,8 @@ final class DoorbellView extends FrameLayout {
         void volumeChanged(int percent, boolean done);
         /** A card was tapped, or held for one that asks for it; the plugin runs its action and reports back. */
         void cardPressed(Cards.Card card);
+        /** Push to talk: the button went down (talk) or came up (stop). */
+        void holdToTalk(boolean pressed);
     }
 
     private static final long HOLD_MILLIS = 800;
@@ -116,6 +118,8 @@ final class DoorbellView extends FrameLayout {
     private State state;
     private boolean speakerOn;
     private boolean micOn;
+    private boolean pushToTalk;  // the Talk mode setting: in a call the microphone button is held to talk
+    private boolean talking;  // push to talk is held right now
 
     DoorbellView(Context context, KsTheme theme, Texts texts, String name, State state, int volumePercent, Callback callback) {
         super(context);
@@ -528,10 +532,16 @@ final class DoorbellView extends FrameLayout {
         picture.setTransform(matrix);
     }
 
+    void setPushToTalk(boolean pushToTalk) {
+        this.pushToTalk = pushToTalk;
+        render();
+    }
+
     void update(State state, boolean speakerOn, boolean micOn) {
         boolean changed = state != this.state;
         boolean answered = changed && this.state == State.RINGING;
         this.state = state;
+        if (state != State.IN_CALL || !micOn) talking = false;  // the plugin stops push to talk with the call
         this.speakerOn = speakerOn;
         this.micOn = micOn;
         render();
@@ -545,7 +555,7 @@ final class DoorbellView extends FrameLayout {
     private void render() {
         // Just the name: the chime, the picture and the buttons already say what is going on.
         title.setText(name);
-        speaking.setVisibility(state == State.IN_CALL && micOn ? VISIBLE : GONE);
+        speaking.setVisibility(speakingVisibility());
         speaking.setText(texts.microphoneActive());
         // The slider's room stays, so nothing jumps when the speaker turns on: not the picture in portrait, nor the cards
         // and buttons in the landscape column (whose button size already counts the slider). The overlay has nothing
@@ -560,7 +570,7 @@ final class DoorbellView extends FrameLayout {
         // Speaker and microphone are toggles: the same icon and label, the circle shows whether they are on.
         buttons.removeAllViews();
         View first = state == State.IN_CALL
-            ? makeButton("mdi:microphone", texts.microphone(), Style.TOGGLE, micOn, callback::toggleMic)
+            ? pushToTalk && micOn ? holdButton() : makeButton("mdi:microphone", texts.microphone(), Style.TOGGLE, micOn, callback::toggleMic)
             : makeButton("mdi:phone", texts.answer(), Style.ANSWER, false, callback::answer);
         View speaker = makeButton("mdi:volume-high", texts.speaker(), Style.TOGGLE, speakerOn, state == State.RINGING ? callback::speaker : callback::toggleSpeaker);
         View last = makeButton("mdi:phone-hangup", state == State.IN_CALL ? texts.endCall() : texts.hangUp(), Style.HANG_UP, false, callback::hangUp);
@@ -649,6 +659,65 @@ final class DoorbellView extends FrameLayout {
         volumeSlide.start();
     }
 
+    /**
+     * Push to talk's button: white while held, like a toggle that is on. It restyles itself instead of re-rendering,
+     * which would take the view away from under the finger.
+     */
+    private View holdButton() {
+        View column = makeButton("mdi:microphone", texts.holdToTalk(), Style.TOGGLE, talking, null);
+        TextView circle = findCircle(column);
+        column.setOnClickListener(null);
+        column.setOnTouchListener((v, event) -> {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN: setTalking(true, circle); return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL: setTalking(false, circle); return true;
+                default: return true;
+            }
+        });
+        if (circle != null) {
+            circle.setOnClickListener(null);
+            circle.setClickable(false);
+        }
+        return column;
+    }
+
+    private void setTalking(boolean now, TextView circle) {
+        if (talking == now) return;
+        talking = now;
+        if (circle != null) {
+            ((GradientDrawable) circle.getBackground()).setColor(now ? Color.WHITE : 0x59FFFFFF);
+            Drawable[] drawables = circle.getCompoundDrawables();
+            if (drawables[0] != null) drawables[0].setTint(now ? 0xFF202124 : Color.WHITE);
+        }
+        speaking.setVisibility(speakingVisibility());
+        if (now) removeCallbacks(hideControls);  // never hide what the finger is on
+        else scheduleHide();
+        safely(() -> callback.holdToTalk(now));
+    }
+
+    /** Push to talk keeps the chip's room in a call, so the picture does not jump each time the button goes down. */
+    private int speakingVisibility() {
+        if (state != State.IN_CALL || !micOn) return GONE;
+        if (!pushToTalk || talking) return VISIBLE;
+        return INVISIBLE;
+    }
+
+    private static TextView findCircle(View column) {
+        if (!(column instanceof android.view.ViewGroup)) return null;
+        android.view.ViewGroup group = (android.view.ViewGroup) column;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof FrameLayout) {
+                FrameLayout frame = (FrameLayout) child;
+                for (int k = 0; k < frame.getChildCount(); k++) {
+                    if (frame.getChildAt(k) instanceof TextView) return (TextView) frame.getChildAt(k);
+                }
+            }
+        }
+        return null;
+    }
+
     private enum Style { ANSWER, TOGGLE, HANG_UP }
 
     private View makeButton(String icon, String label, Style style, boolean active, Runnable action) {
@@ -701,8 +770,10 @@ final class DoorbellView extends FrameLayout {
             caption.setAutoSizeTextTypeUniformWithConfiguration(9, 14, 1, TypedValue.COMPLEX_UNIT_SP);
         }
         if (!(landscape && columnLevel >= 2)) column.addView(caption, captionParams);
-        column.setOnClickListener(v -> safely(action));
-        circle.setOnClickListener(v -> safely(action));
+        if (action != null) {
+            column.setOnClickListener(v -> safely(action));
+            circle.setOnClickListener(v -> safely(action));
+        }
         return column;
     }
 
@@ -1034,7 +1105,7 @@ final class DoorbellView extends FrameLayout {
     /** The overlay hides everything but the speaking chip during a call, as video calls do. */
     private void setControlsHidden(boolean hidden) {
         removeCallbacks(hideControls);
-        boolean can = overlay && state != State.RINGING;
+        boolean can = overlay && state != State.RINGING && !talking;
         hidden = hidden && can;
         if (hidden != controlsHidden) {
             controlsHidden = hidden;

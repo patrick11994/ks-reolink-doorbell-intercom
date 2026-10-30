@@ -31,6 +31,9 @@ final class AudioRenderer implements MediaStream.AudioSink {
     private volatile boolean running = true;
     private volatile byte[] config;
     private volatile int sampleRate;
+    // The track's own volume: the call volume where Android's cannot be changed, times the push to talk ducking.
+    private volatile float gain = 1f, duck = 1f;
+    private volatile boolean volumeChanged = true;
     private final Thread thread;
 
     AudioRenderer(Listener listener) {
@@ -51,6 +54,18 @@ final class AudioRenderer implements MediaStream.AudioSink {
             queue.clear();  // behind: skip ahead rather than delay
             queue.offer(aacFrame);
         }
+    }
+
+    /** The door's loudness when Android's call volume does not do it, 0 to 1. */
+    void setGain(float gain) {
+        this.gain = gain;
+        volumeChanged = true;
+    }
+
+    /** Turns the door down while push to talk is held (Loudness.DUCK), or back up (1). */
+    void setDuck(float duck) {
+        this.duck = duck;
+        volumeChanged = true;
     }
 
     void release() {
@@ -100,6 +115,10 @@ final class AudioRenderer implements MediaStream.AudioSink {
             byte[] pcm = new byte[8192];
             long frames = 0, written = cushion.length / 2;  // samples handed to the track
             while (running) {
+                if (volumeChanged) {
+                    volumeChanged = false;
+                    track.setVolume(gain * duck);
+                }
                 byte[] frame = queue.poll(20, TimeUnit.MILLISECONDS);
                 if (frame != null) {
                     int input = codec.dequeueInputBuffer(10_000);
