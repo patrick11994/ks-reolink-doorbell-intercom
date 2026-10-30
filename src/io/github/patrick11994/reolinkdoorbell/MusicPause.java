@@ -7,12 +7,15 @@ import java.util.Map;
 /**
  * Pauses the kiosk's music (its Sendspin player, or the player it follows) during a ring or call, and resumes it
  * afterwards, but only if it was playing and this plugin paused it. Needs Kiosk Satellite 2026.10.41 or newer, which
- * reports `playing`: an older one leaves `playing` out, and then the music is left alone.
+ * reports `playing`: an older one leaves `playing` out, and then the music is left alone. Like WakeWordGuard, whether
+ * it paused is remembered across sessions, and restore() resumes at the next start what a stopped session left paused.
  */
 final class MusicPause {
     /** The host commands this needs, as a seam for tests. */
     interface Host {
         void command(String name, Map<String, Object> arguments, Result result);
+        /** Remembers whether this plugin paused the music, in a setting that survives restarts. */
+        void remember(boolean pausedByUs);
     }
 
     interface Result {
@@ -26,6 +29,13 @@ final class MusicPause {
 
     MusicPause(Host host) {
         this.host = host;
+    }
+
+    /** The session started: if a previous one paused the music and never got to resume it, resume it now. */
+    synchronized void restore(boolean rememberedPausedByUs) {
+        if (!rememberedPausedByUs) return;
+        pausedByUs = true;
+        settle();
     }
 
     /** A ring or call started (true) or the viewer closed (false). */
@@ -51,7 +61,10 @@ final class MusicPause {
                         return;
                     }
                 }
-                host.command("sendspinControl", Collections.<String, Object>singletonMap("command", "pause"), (paused, ignored) -> finish(paused));
+                host.command("sendspinControl", Collections.<String, Object>singletonMap("command", "pause"), (paused, ignored) -> {
+                    if (paused) host.remember(true);
+                    finish(paused);
+                });
             });
         } else if (!wanted && pausedByUs) {
             busy = true;
@@ -59,6 +72,7 @@ final class MusicPause {
                 synchronized (MusicPause.this) {
                     busy = false;
                     pausedByUs = false;  // resumed, or it failed: never try to resume twice
+                    host.remember(false);
                     settle();
                 }
             });
