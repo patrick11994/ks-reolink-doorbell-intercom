@@ -77,6 +77,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     @Override public void start(PluginHost host, Map<String, Object> values) {
         this.host = host;
+        Texts.setAssets(host::openAsset);  // the language files under assets/i18n
         settings = new Settings(values);
         texts = Texts.of(settings.language);
         controller = new RingController(this, System::currentTimeMillis, settings.autoCloseMillis);

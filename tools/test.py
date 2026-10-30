@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory(prefix='kiosk-plugin-test-') as directory:
     subprocess.run([tool('javac'), '--release', '8', '-cp', platform, '-d', directory, *map(str, sources)], check=True)
     # Tests run on the plain JVM with only java.* on the classpath, so they can never touch an Android stub.
     for test in tests:
-        subprocess.run([tool('java'), '-ea', '-cp', directory, test], check=True)
+        subprocess.run([tool('java'), '-ea', '-Dreolink.assets=' + str(root / 'assets'), '-cp', directory, test], check=True)
 
 subprocess.run([sys.executable, str(root / 'tools/test_android_sdk.py')], check=True)
 subprocess.run([sys.executable, str(root / 'tools/test_plugin_manifest.py')], check=True)
