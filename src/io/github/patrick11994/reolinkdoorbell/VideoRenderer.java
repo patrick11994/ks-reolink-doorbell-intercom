@@ -41,7 +41,7 @@ final class VideoRenderer implements MediaStream.VideoSink {
     private final Surface surface;
     private final Listener listener;
     private final ArrayBlockingQueue<Frame> queue = new ArrayBlockingQueue<>(60);
-    private final long created = System.currentTimeMillis();
+    private final long created = System.nanoTime() / 1_000_000;
     private volatile boolean running = true;
     private volatile boolean waitForKeyframe;
     private final Thread thread;
@@ -89,7 +89,7 @@ final class VideoRenderer implements MediaStream.VideoSink {
             while (running && first == null) {
                 Frame frame = queue.poll(200, TimeUnit.MILLISECONDS);
                 if (frame != null && frame.keyframe) first = frame;
-                if (first == null && !warned && System.currentTimeMillis() - created > 6000) {
+                if (first == null && !warned && System.nanoTime() / 1_000_000 - created > 6000) {
                     warned = true;
                     listener.onVideoError(null);  // no keyframe yet: the plugin shows its own message
                 }
@@ -180,7 +180,7 @@ final class VideoRenderer implements MediaStream.VideoSink {
                     }
                     if (!shown) {
                         shown = true;
-                        listener.onVideoStats(System.currentTimeMillis() - created, decodeAverage);
+                        listener.onVideoStats(System.nanoTime() / 1_000_000 - created, decodeAverage);
                     } else if (slot % 50 == 0) {
                         listener.onVideoStats(-1, decodeAverage);
                     }

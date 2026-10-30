@@ -169,33 +169,33 @@ public final class RtspSession {
         String reason = null;
         byte[] buffer = new byte[65536];
         byte[] header = new byte[3];
-        long lastKeepalive = System.currentTimeMillis();
+        long lastKeepalive = System.nanoTime() / 1_000_000;
         long lastPacket = lastKeepalive;
         try {
             socket.setSoTimeout(1000);
             while (!closed) {
-                if (System.currentTimeMillis() - lastKeepalive >= keepaliveMillis) {
+                if (System.nanoTime() / 1_000_000 - lastKeepalive >= keepaliveMillis) {
                     synchronized (out) {
                         out.write(requestBytes("GET_PARAMETER", aggregateUrl(), new LinkedHashMap<>()));
                     }
-                    lastKeepalive = System.currentTimeMillis();
+                    lastKeepalive = System.nanoTime() / 1_000_000;
                 }
                 int first;
                 try {
                     first = in.read();
                 } catch (SocketTimeoutException quiet) {
-                    if (silenceMillis > 0 && System.currentTimeMillis() - lastPacket > silenceMillis) throw new IOException("the stream stopped");
+                    if (silenceMillis > 0 && System.nanoTime() / 1_000_000 - lastPacket > silenceMillis) throw new IOException("the stream stopped");
                     continue;
                 }
                 if (first < 0) throw new IOException("the doorbell closed the stream");
                 if (first == '$') {
                     // The one-second timeout only polls between packets: inside one, a Wi-Fi stall is waited out.
-                    long deadline = System.currentTimeMillis() + STALL_MILLIS;
+                    long deadline = System.nanoTime() / 1_000_000 + STALL_MILLIS;
                     readFully(in, header, 3, deadline);
                     int channel = header[0] & 0xFF;
                     int length = ((header[1] & 0xFF) << 8) | (header[2] & 0xFF);
                     readFully(in, buffer, length, deadline);
-                    lastPacket = System.currentTimeMillis();
+                    lastPacket = System.nanoTime() / 1_000_000;
                     listener.onPacket(channel, buffer, 0, length);
                 } else if (first == 'R') {
                     skipResponse(in);  // an answer to a keepalive
@@ -222,7 +222,7 @@ public final class RtspSession {
             try {
                 n = in.read(buffer, done, length - done);
             } catch (SocketTimeoutException stall) {
-                if (System.currentTimeMillis() > deadline) throw new IOException("the stream stalled in the middle of a packet");
+                if (System.nanoTime() / 1_000_000 > deadline) throw new IOException("the stream stalled in the middle of a packet");
                 continue;
             }
             if (n < 0) throw new IOException("the doorbell closed the stream");
@@ -252,7 +252,7 @@ public final class RtspSession {
         for (int attempt = 0; attempt < 2; attempt++) {
             out.write(requestBytes(method, uri, extra));
             out.flush();
-            Response response = readResponse(in, System.currentTimeMillis() + answerMillis);
+            Response response = readResponse(in, System.nanoTime() / 1_000_000 + answerMillis);
             if (response.status == 401 && realm == null) {
                 String challenge = response.headers.getOrDefault("www-authenticate", "");
                 Matcher r = REALM.matcher(challenge), n = NONCE.matcher(challenge);
@@ -347,7 +347,7 @@ public final class RtspSession {
     }
 
     private static void inTime(long deadline) throws IOException {
-        if (System.currentTimeMillis() > deadline) throw new IOException("RTSP answer took too long");
+        if (System.nanoTime() / 1_000_000 > deadline) throw new IOException("RTSP answer took too long");
     }
 
     private static int contentLength(String value) throws IOException {

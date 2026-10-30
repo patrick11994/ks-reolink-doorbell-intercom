@@ -512,7 +512,7 @@ final class DoorbellView extends FrameLayout {
 
         @Override protected void onDraw(Canvas canvas) {
             if (countdownMillis <= 0) return;
-            float left = System.currentTimeMillis() - countdownStart;
+            float left = System.nanoTime() / 1_000_000 - countdownStart;
             float remaining = Math.max(0f, Math.min(1f, 1f - left / countdownMillis));
             float inset = progress.getStrokeWidth() / 2;
             bounds.set(inset, inset, getWidth() - inset, getHeight() - inset);
@@ -780,7 +780,7 @@ final class DoorbellView extends FrameLayout {
         if (talking == now) return;
         talking = now;
         if (now) {
-            talkDownAt = System.currentTimeMillis();
+            talkDownAt = System.nanoTime() / 1_000_000;
             if (talkHint) endTalkHint();
         }
         if (circle != null) {
@@ -789,7 +789,7 @@ final class DoorbellView extends FrameLayout {
             if (drawables[0] != null) drawables[0].setTint(now ? 0xFF202124 : Color.WHITE);
         }
         speaking.setVisibility(speakingVisibility());
-        if (!now && System.currentTimeMillis() - talkDownAt < SHORT_TAP_MILLIS) showTalkHint();
+        if (!now && System.nanoTime() / 1_000_000 - talkDownAt < SHORT_TAP_MILLIS) showTalkHint();
         if (now) removeCallbacks(hideControls);  // never hide what the finger is on
         else scheduleHide();
         safely(() -> callback.holdToTalk(now));
