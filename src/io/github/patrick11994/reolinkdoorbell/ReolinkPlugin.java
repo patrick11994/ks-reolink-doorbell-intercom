@@ -43,6 +43,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private static final String ENTITY_EVENT = "ks.ha.entity.";
 
     private volatile PluginHost host;
+    private volatile boolean stopped;  // a ring that raced stop() must not start a stream after stop released it
     private volatile Settings settings;
     private volatile Texts texts = Texts.of("Automatic");
     private volatile RingController controller;
@@ -78,6 +79,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private volatile boolean viewerOpen;
 
     @Override public void start(PluginHost host, Map<String, Object> values) {
+        stopped = false;
         this.host = host;
         Texts.setAssets(host::openAsset);  // the language files under assets/i18n
         settings = new Settings(values);
@@ -183,6 +185,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     @Override public void stop() {
         // The host is revoked before stop: release resources without calling it.
+        stopped = true;
         host = null;
         BaichuanClient client = events;
         events = null;
@@ -446,7 +449,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     /** Starts the doorbell stream at the ring, before the viewer exists, so the first picture is ready sooner. */
     private synchronized void startStream() {
         Settings s = settings;
-        if (stream != null || !s.configured()) return;
+        if (stream != null || !s.configured() || stopped) return;
         ringAt = System.currentTimeMillis();
         log("media: start stream " + s.streamPath + " over " + (s.videoPath.equals("RTSP") ? "RTSP" : "Baichuan") + " (Video over: " + s.videoPath + ")");
         publishText("first_frame", texts.firstPictureReading(), texts.waiting());
