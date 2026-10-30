@@ -135,6 +135,21 @@ public final class RingController {
         actions.updateViewer(state, speakerOn, micOn);
     }
 
+    /**
+     * Push to talk held: ringing or listening, it answers; in a call opened by hand, where the microphone is still
+     * off, it turns the microphone on (the speaker stays as it is). The plugin mutes the microphone between holds.
+     */
+    public synchronized void talk() {
+        if (state == State.RINGING || state == State.LISTENING) {
+            answer();
+            return;
+        }
+        if (state != State.IN_CALL || micOn) return;
+        micOn = true;
+        actions.setAudio(speakerOn, true);
+        actions.updateViewer(state, speakerOn, micOn);
+    }
+
     /** In call: mute or unmute the door audio. */
     public synchronized void toggleSpeaker() {
         if (state != State.IN_CALL && state != State.LISTENING) return;
