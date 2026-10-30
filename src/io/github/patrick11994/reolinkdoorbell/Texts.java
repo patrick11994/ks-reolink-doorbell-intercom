@@ -34,7 +34,8 @@ final class Texts {
     String on() { return t("on", "aan"); }
     String off() { return t("off", "uit"); }
     String microphoneActive() { return t("Microphone active", "Microfoon actief"); }
-    String holdToTalk() { return t("Hold to talk", "Ingedrukt praten"); }
+    String holdToTalk() { return t("Talk", "Praten"); }
+    String holdToTalkHint() { return t("Hold the button to talk", "Houd de knop vast om te praten"); }
     String connecting() { return t("Connecting to the doorbell…", "Verbinden met de deurbel…"); }
     String noPictureYet() { return t("No picture from the doorbell yet", "Nog geen beeld van de deurbel"); }
     String noVideo(String reason) { return t("No video: ", "Geen beeld: ") + reason; }
