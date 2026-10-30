@@ -47,7 +47,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private volatile Texts texts = Texts.of("Automatic");
     private volatile RingController controller;
     private volatile DoorbellView view;
-    private BaichuanClient events;
+    private volatile BaichuanClient events;  // written under this
     private ScheduledExecutorService ticker;
     private volatile WakeWordGuard wakeWord;
     private volatile MusicPause music;
@@ -208,8 +208,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             publishText("connection", texts.connectionReading(), texts.notConfigured());
             return;
         }
+        BaichuanClient[] self = new BaichuanClient[1];  // a replaced client can take up to its timeout to stop: ignore it
         BaichuanClient client = new BaichuanClient(s.host, 9000, s.username, s.password, new BaichuanClient.Listener() {
             @Override public void onConnection(boolean connected, String detail) {
+                if (events != self[0]) return;
                 Texts t = texts;
                 boolean connecting = "connecting".equals(detail);
                 publishText("connection", t.connectionReading(), connected ? t.connected() : connecting ? t.connectingState() : detail);
@@ -218,11 +220,12 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
             @Override public void onAlarm(AlarmEvents.Event event) {
                 RingController c = controller;
-                if (c == null || event.channel != 0) return;
+                if (c == null || event.channel != 0 || events != self[0]) return;
                 if (event.visitor()) publishText("last_ring", texts.lastRingReading(), new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date()));
                 c.onVisitor(event.visitor());
             }
         });
+        self[0] = client;
         events = client;
         client.start();
     }
