@@ -190,7 +190,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }
         if (event.startsWith(ENTITY_EVENT)) {
             String entityId = event.substring(ENTITY_EVENT.length());
-            snapshots.put(entityId, payload);
+            synchronized (followed) {
+                if (!followed.contains(entityId)) return;  // late, for a card no longer shown: it would show next call
+                snapshots.put(entityId, payload);
+            }
             DoorbellView v = view;
             if (v != null) v.post(() -> v.entityChanged(entityId, payload));
             return;
@@ -291,12 +294,12 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                     @Override public void cardPressed(Cards.Card card) { runCard(card); }
                     @Override public void holdToTalk(boolean pressed) { ReolinkPlugin.this.holdToTalk(pressed); }
                 });
+                view = created;  // first, so a state arriving during the replay below reaches this view, not the old one
                 for (Map.Entry<String, Map<?, ?>> known : snapshots.entrySet()) created.entityChanged(known.getKey(), known.getValue());
                 created.setCards(settings.cards);
                 created.setPushToTalk(callPushToTalk);
                 if (c != null) created.update(c.state(), c.speakerOn(), c.micOn());
                 created.setCountdown(countdownStart, countdownMillis);
-                view = created;
                 return created;
             }
 
