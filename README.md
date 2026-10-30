@@ -168,8 +168,9 @@ The call screen, the messages, the readings and the Check button's results come 
 
 1. Copy [`en.properties`](assets/i18n/en.properties) to a file named after the language code, such as `pt-BR.properties` for Brazilian Portuguese or `de.properties` for German.
 2. Translate everything after each `=`. Keep the words in braces, such as `{name}`, exactly as they are: the plugin fills them in.
-3. Add the language to [`languages.properties`](assets/i18n/languages.properties), as its code and its name in that language, such as `pt-BR=Português (Brasil)`, and add the same name to the **Language** setting's options in [`kiosk-satellite-plugin.json`](kiosk-satellite-plugin.json).
-4. Open a pull request. The tests check that the file only has the plugin's texts and keeps every placeholder.
+3. [Open an issue](https://github.com/patrick11994/ks-reolink-doorbell-intercom/issues/new) with the file attached, and the language's name as it should appear in the **Language** setting, such as *Português (Brasil)*.
+
+The language is added in the next release. Its tests check that the file only has the plugin's texts and keeps every placeholder.
 
 Texts a translation leaves out show in English. With **Language** on *Automatic*, the plugin follows the panel's Android language: a file for the language and region first (`pt-BR`), then the language (`pt`), then English. The settings page itself stays in English: Kiosk Satellite shows plugin settings as they are written.
 
