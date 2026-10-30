@@ -62,6 +62,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private boolean talkFromRing;  // ONVIF: talk opens at the ring and stays; Baichuan only while the microphone is on
     private MicCapture mic;
     private CallVolume callVolume;
+    // The slider's level: updateSettings stores it for later sessions but does not call configure, so settings keeps
+    // the level from the start. Everything reads this instead.
+    private volatile int liveCallVolume;
     private CallMode callMode;
     private long ringAt;
     // Push to talk: the call's ducking, and when the door comes back up after the button lets go (guarded by this).
@@ -84,6 +87,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         Texts.setAssets(host::openAsset);  // the language files under assets/i18n
         settings = new Settings(values);
         texts = Texts.of(settings.language);
+        liveCallVolume = settings.callVolume;
         controller = new RingController(this, System::currentTimeMillis, settings.autoCloseMillis);
         controller.setMaxCallMillis(settings.maxCallMillis);
         wakeWord = new WakeWordGuard(new WakeWordGuard.Host() {
@@ -140,6 +144,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         Settings previous = settings;
         settings = new Settings(values);
         texts = Texts.of(settings.language);
+        liveCallVolume = settings.callVolume;
         RingController c = controller;
         if (c != null) {
             c.setAutoCloseMillis(settings.autoCloseMillis);
@@ -260,7 +265,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                     if (callVolume == null) callVolume = new CallVolume(context);
                     if (callMode == null) callMode = new CallMode(context);
                 }
-                DoorbellView created = new DoorbellView(context, theme, t, name, current, settings.callVolume, new DoorbellView.Callback() {
+                DoorbellView created = new DoorbellView(context, theme, t, name, current, liveCallVolume, new DoorbellView.Callback() {
                     @Override public void hangUp() { RingController c = controller; if (c != null) c.hangUp(); }
                     @Override public void speaker() { RingController c = controller; if (c != null) c.speaker(); }
                     @Override public void answer() { RingController c = controller; if (c != null) c.answer(); }
@@ -386,7 +391,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 showMessage(message);
                 log(message);
             });
-            applyCallVolume(settings.callVolume, true);
+            applyCallVolume(liveCallVolume, true);
             if (talking) audioRenderer.setDuck(Loudness.DUCK);
             stream.attachAudio(audioRenderer);
         } else if (!speakerOn && audioRenderer != null) {
@@ -623,6 +628,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     }
 
     private void setCallVolume(int percent, boolean done) {
+        liveCallVolume = percent;
         applyCallVolume(percent, done);
         if (!done) return;
         PluginHost h = host;
