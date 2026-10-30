@@ -311,7 +311,11 @@ public final class RtspSession {
         String status = (char) first + line(in);
         Response response = new Response();
         String[] parts = status.split(" ");
-        response.status = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
+        try {
+            response.status = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
+        } catch (NumberFormatException e) {
+            throw new IOException("bad RTSP status line");
+        }
         int length = 0;
         int count = 0;
         for (String line = line(in); !line.isEmpty(); line = line(in)) {
