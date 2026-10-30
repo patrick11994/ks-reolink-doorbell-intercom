@@ -26,6 +26,7 @@ public final class MediaTest {
         hubReplaysFromKeyframe();
         h264DropsRunawayFrame();
         rtspRefusesHugeAnswers();
+        rtspStallAndSilence();
         System.out.println("MediaTest passed");
     }
 
@@ -147,6 +148,47 @@ public final class MediaTest {
         check(sizes.get(0) <= H264Depacketizer.MAX_UNIT, true);
         d.onRtp(rtp(packets + 1, 4600, true, new byte[] {0x41, 2}), 0, 14);  // the next normal frame still comes through
         check(sizes.get(sizes.size() - 1), 6);
+    }
+
+    /** A packet that stalls halfway is waited for; a stream that stops altogether ends the session. */
+    static void rtspStallAndSilence() {
+        try (java.net.ServerSocket server = new java.net.ServerSocket(0)) {
+            Thread fake = new Thread(() -> {
+                try (java.net.Socket socket = server.accept()) {
+                    java.io.BufferedReader requests = new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(), java.nio.charset.StandardCharsets.US_ASCII));
+                    java.io.OutputStream out = socket.getOutputStream();
+                    for (int cseq = 1; cseq <= 2; cseq++) {  // OPTIONS, DESCRIBE
+                        for (String line = requests.readLine(); line != null && !line.isEmpty(); line = requests.readLine()) {}
+                        out.write(("RTSP/1.0 200 OK\r\nCSeq: " + cseq + "\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                    }
+                    byte[] packet = {'$', 0, 0, 4, 1, 2, 3, 4};
+                    out.write(packet, 0, 5);
+                    out.flush();
+                    Thread.sleep(1500);  // longer than the one-second poll
+                    out.write(packet, 5, 3);
+                    out.write(packet);
+                    out.flush();
+                    Thread.sleep(5000);  // then nothing
+                } catch (Exception closed) {
+                    // The client gave up, as it should.
+                }
+            });
+            fake.start();
+            RtspSession session = new RtspSession("127.0.0.1", server.getLocalPort(), "/x", "u", "p", 60_000);
+            session.describe(java.util.Collections.<String, String>emptyMap());
+            List<String> packets = new java.util.concurrent.CopyOnWriteArrayList<>();
+            java.util.concurrent.CompletableFuture<String> closed = new java.util.concurrent.CompletableFuture<>();
+            session.start(new RtspSession.Listener() {
+                @Override public void onPacket(int channel, byte[] buffer, int offset, int length) { packets.add(channel + ":" + hex(java.util.Arrays.copyOfRange(buffer, offset, offset + length))); }
+                @Override public void onClosed(String reason) { closed.complete(String.valueOf(reason)); }
+            }, "test-rtsp", 2000);
+            check(closed.get(6, java.util.concurrent.TimeUnit.SECONDS), "the stream stopped");
+            check(packets.toString(), "[0:01020304, 0:01020304]");
+            session.close();
+            fake.join(6000);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
     }
 
     /** An RTSP answer may not announce a giant body, send an endless header line, endless headers or endless packets. */
