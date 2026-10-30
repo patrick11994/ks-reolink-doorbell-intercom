@@ -111,7 +111,7 @@ public final class BaichuanClient {
                 closeSocket();
             }
             // A session that held for a minute was healthy: start the backoff over.
-            if (connectedSince > 0 && System.currentTimeMillis() - connectedSince > 60_000) backoff = firstRetry;
+            if (connectedSince > 0 && System.nanoTime() / 1_000_000 - connectedSince > 60_000) backoff = firstRetry;
             if (!running) break;
             try {
                 // Wrong credentials: do not hammer the doorbell's login limiter. Anything else: rings are being
@@ -137,11 +137,11 @@ public final class BaichuanClient {
         int subscribeId = nextId(CHANNEL_PUSH);
         out.write(BcMessage.encodeModern(CMD_SUBSCRIBE, subscribeId, new byte[0], new byte[0]));
         out.flush();
-        connectedSince = System.currentTimeMillis();
+        connectedSince = System.nanoTime() / 1_000_000;
         listener.onConnection(true, "connected");
         s.setSoTimeout(1000);
         // Only what arrives counts as a sign of life: a write succeeds into the send buffer even when the doorbell is gone.
-        long lastReceived = System.currentTimeMillis();
+        long lastReceived = System.nanoTime() / 1_000_000;
         long lastSent = lastReceived;
         boolean pushesSeen = false;
         while (running) {
@@ -151,7 +151,7 @@ public final class BaichuanClient {
                 if (in.read() < 0) throw new EOFException("the doorbell closed the connection");
                 in.reset();
             } catch (SocketTimeoutException quiet) {
-                long now = System.currentTimeMillis();
+                long now = System.nanoTime() / 1_000_000;
                 if (now - Math.max(lastReceived, lastSent) > keepaliveMillis) {
                     // reolink_aio: LinkType (93) keeps a live subscription open; re-subscribing revives a silent one.
                     // The doorbell answers both, so allow one interval for the answer before sending again.
@@ -171,7 +171,7 @@ public final class BaichuanClient {
                 throw new IOException("the doorbell stopped in the middle of a message");
             }
             s.setSoTimeout(1000);
-            lastReceived = System.currentTimeMillis();
+            lastReceived = System.nanoTime() / 1_000_000;
             if (message.command == CMD_ALARM) {
                 pushesSeen = true;
                 List<AlarmEvents.Event> events = AlarmEvents.parse(decode(message, false));

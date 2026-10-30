@@ -88,7 +88,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         settings = new Settings(values);
         texts = Texts.of(settings.language);
         liveCallVolume = settings.callVolume;
-        controller = new RingController(this, System::currentTimeMillis, settings.autoCloseMillis);
+        // Monotonic: a clock set after boot (no RTC battery, NTP) must not end a ring at once or stretch a call.
+        controller = new RingController(this, () -> System.nanoTime() / 1_000_000, settings.autoCloseMillis);
         controller.setMaxCallMillis(settings.maxCallMillis);
         wakeWord = new WakeWordGuard(new WakeWordGuard.Host() {
             @Override public void command(String name, Map<String, Object> arguments, WakeWordGuard.Result result) {
@@ -471,7 +472,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private synchronized void startStream() {
         Settings s = settings;
         if (stream != null || !s.configured() || stopped) return;
-        ringAt = System.currentTimeMillis();
+        ringAt = System.nanoTime() / 1_000_000;
         log("media: start stream " + s.streamPath + " over " + (s.videoPath.equals("RTSP") ? "RTSP" : "Baichuan") + " (Video over: " + s.videoPath + ")");
         publishText("first_frame", texts.firstPictureReading(), texts.waiting());
         stream = openStream(s);
@@ -566,7 +567,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
             @Override public void onVideoStats(long firstFrameMillis, double decodeMillis) {
                 if (firstFrameMillis >= 0) {
-                    long sinceRing = System.currentTimeMillis() - ringAt;
+                    long sinceRing = System.nanoTime() / 1_000_000 - ringAt;
                     publishText("first_frame", texts.firstPictureReading(), texts.afterRing(sinceRing));
                 }
             }

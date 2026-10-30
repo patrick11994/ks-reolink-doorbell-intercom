@@ -27,7 +27,7 @@ public final class FrameHub {
 
     public synchronized void start() {
         running = true;
-        startedAt = System.currentTimeMillis();
+        startedAt = System.nanoTime() / 1_000_000;
     }
 
     public synchronized void stop() {
@@ -58,7 +58,7 @@ public final class FrameHub {
         if (!keyframeSeen) {
             if (!keyframe) return;
             keyframeSeen = true;
-            firstKeyframeMillis = System.currentTimeMillis() - startedAt;
+            firstKeyframeMillis = System.nanoTime() / 1_000_000 - startedAt;
         }
         if (keyframe) {
             gop.clear();
