@@ -10,6 +10,7 @@ public final class MusicPauseTest {
     /** A fake Kiosk Satellite: answers at once, or holds the answer to the read when asked to. */
     private static final class FakeHost implements MusicPause.Host {
         final List<String> log = new ArrayList<>();
+        boolean remembered;
         Boolean playing = true;  // null: an older Kiosk Satellite without the field
         boolean holdRead;
         MusicPause.Result heldRead;
@@ -33,6 +34,8 @@ public final class MusicPauseTest {
                 result.done(true, null);
             }
         }
+
+        @Override public void remember(boolean pausedByUs) { remembered = pausedByUs; }
 
         String take() { String all = String.join(", ", log); log.clear(); return all; }
     }
@@ -82,6 +85,19 @@ public final class MusicPauseTest {
         pause.setActive(false);
         pause.setActive(true);
         check(host.take(), "read, pause, play, read, pause");
+
+        // Paused, then the plugin stopped mid-call: the next session resumes it.
+        host = new FakeHost();
+        pause = new MusicPause(host);
+        pause.setActive(true);
+        check(host.remembered, true);
+        host.take();
+        pause = new MusicPause(host);  // the next start
+        pause.restore(host.remembered);
+        check(host.take(), "play");
+        check(host.remembered, false);
+        pause.restore(false);  // nothing left paused: left alone
+        check(host.take(), "");
 
         System.out.println("MusicPauseTest passed");
     }

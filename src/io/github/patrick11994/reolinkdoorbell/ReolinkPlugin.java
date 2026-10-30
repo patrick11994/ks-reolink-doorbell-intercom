@@ -115,18 +115,31 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             }
         });
         wakeWord.restore(settings.wakeWordRestore);
-        music = new MusicPause((name, arguments, result) -> {
-            PluginHost h = ReolinkPlugin.this.host;
-            if (h == null) {
-                result.done(false, null);
-                return;
+        music = new MusicPause(new MusicPause.Host() {
+            @Override public void command(String name, Map<String, Object> arguments, MusicPause.Result result) {
+                PluginHost h = ReolinkPlugin.this.host;
+                if (h == null) {
+                    result.done(false, null);
+                    return;
+                }
+                try {
+                    h.executeCommand(name, arguments, (ok, data, error) -> result.done(ok, data));
+                } catch (RuntimeException unavailable) {
+                    result.done(false, null);  // an older Kiosk Satellite, or the session ended
+                }
             }
-            try {
-                h.executeCommand(name, arguments, (ok, data, error) -> result.done(ok, data));
-            } catch (RuntimeException unavailable) {
-                result.done(false, null);  // an older Kiosk Satellite, or the session ended
+
+            @Override public void remember(boolean pausedByUs) {
+                PluginHost h = ReolinkPlugin.this.host;
+                if (h == null) return;
+                try {
+                    h.updateSettings(Collections.<String, Object>singletonMap("musicRestore", pausedByUs));
+                } catch (RuntimeException | LinkageError older) {
+                    // Without it, only a stop mid-call could leave the music paused.
+                }
             }
         });
+        music.restore(settings.musicRestore);
         ticker = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread thread = new Thread(r, "reolink-ticker");
             thread.setDaemon(true);
@@ -741,7 +754,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     static final class Settings {
         final String host, username, password, streamPath, language, microphone, micRate, musicPause, chimeStream, talkPath, videoPath;
         private final String name;
-        final boolean chime, wakeScreen, wakeWordRestore, callMode, pushToTalk;
+        final boolean chime, wakeScreen, wakeWordRestore, musicRestore, callMode, pushToTalk;
         final long autoCloseMillis, maxCallMillis;
         final int callVolume, chimeVolume;
         final List<Cards.Card> cards;
@@ -772,6 +785,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             autoCloseMillis = autoClose(string(values, "autoClose"));
             maxCallMillis = maxCall(string(values, "maxCall"));
             wakeWordRestore = Boolean.TRUE.equals(values.get("wakeWordRestore"));
+            musicRestore = Boolean.TRUE.equals(values.get("musicRestore"));
             callMode = !Boolean.FALSE.equals(values.get("callMode"));
             streamPath = string(values, "stream").startsWith("Sub") ? "/h264Preview_01_sub" : "/h264Preview_01_main";
             Object volume = values.get("callVolume");
