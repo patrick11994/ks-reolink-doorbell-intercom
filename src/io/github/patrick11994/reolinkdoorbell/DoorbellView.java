@@ -622,6 +622,54 @@ final class DoorbellView extends FrameLayout {
         }
         if (controlsHidden) buttons.setVisibility(INVISIBLE);
         if (landscape) post(this::fitColumn);
+        if (landscape && columnLevel >= 1) evenLabelsWhenLaidOut();
+    }
+
+    private static final String CAPTION = "caption";
+    private static final float CAPTION_SP = 14, MIN_CAPTION_SP = 9;
+
+    /**
+     * The low layout's labels, side by side: if one is too wide for its button, all of them shrink by the same
+     * amount, to what the widest needs, so they stay alike. Measured from the text itself, in the label's own font.
+     */
+    private void evenLabels() {
+        List<TextView> captions = new ArrayList<>();
+        collectCaptions(buttons, captions);
+        if (captions.isEmpty()) return;
+        float scale = 1f;
+        Paint paint = new Paint();
+        for (TextView caption : captions) {
+            // Only the side-by-side labels have a fixed room; Speaker's on top is as wide as its own text.
+            if (caption.getLayoutParams() == null || caption.getLayoutParams().width != LinearLayout.LayoutParams.MATCH_PARENT) continue;
+            int room = caption.getWidth() - caption.getPaddingLeft() - caption.getPaddingRight();
+            if (room <= 0) return;  // not laid out: nothing to measure
+            paint.set(caption.getPaint());
+            paint.setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, CAPTION_SP, getResources().getDisplayMetrics()));
+            float needed = paint.measureText(caption.getText().toString());
+            // A little short of the exact fit: text laid out at exactly its room still loses its last letter.
+            if (needed > room * 0.94f) scale = Math.min(scale, room * 0.94f / needed);
+        }
+        float size = Math.max(MIN_CAPTION_SP, CAPTION_SP * scale);
+        for (TextView caption : captions) caption.setTextSize(TypedValue.COMPLEX_UNIT_SP, size);
+    }
+
+    /** Once the new buttons have their widths: they are measured in the next layout pass, not when built. */
+    private void evenLabelsWhenLaidOut() {
+        buttons.getViewTreeObserver().addOnGlobalLayoutListener(new android.view.ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override public void onGlobalLayout() {
+                buttons.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                evenLabels();
+            }
+        });
+        buttons.requestLayout();
+    }
+
+    private static void collectCaptions(View view, List<TextView> into) {
+        if (view instanceof TextView && CAPTION.equals(view.getTag())) into.add((TextView) view);
+        if (view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) collectCaptions(group.getChildAt(i), into);
+        }
     }
 
     /**
@@ -814,11 +862,12 @@ final class DoorbellView extends FrameLayout {
         caption.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         captionParams.topMargin = theme.px(2);
+        caption.setTag(CAPTION);
         if (landscape && columnLevel >= 1) {
-            // Side by side in a narrow column: one line, shrinking to fit rather than wrapping.
+            // Side by side in a narrow column: one line; evenLabels shrinks all of them alike if one does not fit.
             captionParams.width = LinearLayout.LayoutParams.MATCH_PARENT;
             caption.setMaxLines(1);
-            caption.setAutoSizeTextTypeUniformWithConfiguration(9, 14, 1, TypedValue.COMPLEX_UNIT_SP);
+            caption.setEllipsize(android.text.TextUtils.TruncateAt.END);
         }
         if (!(landscape && columnLevel >= 2)) column.addView(caption, captionParams);
         if (action != null) {
