@@ -66,6 +66,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     // Push to talk: the call's ducking, and when the door comes back up after the button lets go (guarded by this).
     private boolean talking;
     private ScheduledFuture<?> unduck;
+    // Taken when the viewer opens: a Talk mode changed mid-call must not split the view from the microphone.
+    private volatile boolean callPushToTalk;
     /** How long the door stays down after push to talk lets go: our own voice comes back from the door's microphone
      * about 1.4 s after we spoke (1 s to the door, 0.4 s back), and should not play at full volume. */
     private static final long DUCK_TAIL_MILLIS = 1500;
@@ -243,6 +245,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         final String name = settings.name(t);
         log("viewer: open (" + (rang ? "ring" : "by hand") + ")");
         stopMedia();  // a fresh call: nothing from an earlier one may linger
+        callPushToTalk = settings.pushToTalk;
         startStream();
         viewerOpen = true;
         followCards(settings.cards);
@@ -269,7 +272,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 });
                 for (Map.Entry<String, Map<?, ?>> known : snapshots.entrySet()) created.entityChanged(known.getKey(), known.getValue());
                 created.setCards(settings.cards);
-                created.setPushToTalk(settings.pushToTalk);
+                created.setPushToTalk(callPushToTalk);
                 if (c != null) created.update(c.state(), c.speakerOn(), c.micOn());
                 created.setCountdown(countdownStart, countdownMillis);
                 view = created;
@@ -393,8 +396,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 talk = openTalk(settings);
                 talk.start();
             }
-            if (settings.pushToTalk) log("microphone: push to talk");
-            mic = new MicCapture(talk, settings.microphone, settings.micRate, settings.pushToTalk && !talking, state -> {
+            if (callPushToTalk) log("microphone: push to talk");
+            mic = new MicCapture(talk, settings.microphone, settings.micRate, callPushToTalk && !talking, state -> {
                 log("microphone: " + state);
                 if (!state.startsWith("live")) showMessage(texts.noMicrophone());
             });
