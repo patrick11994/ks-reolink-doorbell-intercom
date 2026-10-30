@@ -120,6 +120,7 @@ final class DoorbellView extends FrameLayout {
     private boolean micOn;
     private boolean pushToTalk;  // the Talk mode setting: in a call the microphone button is held to talk
     private boolean talking;  // push to talk is held right now
+    private boolean renderPending;  // the buttons changed while Hold to talk was held
 
     DoorbellView(Context context, KsTheme theme, Texts texts, String name, State state, int volumePercent, Callback callback) {
         super(context);
@@ -331,8 +332,10 @@ final class DoorbellView extends FrameLayout {
             topBox.setGravity(Gravity.CENTER_HORIZONTAL);
             title.setGravity(Gravity.CENTER);
             topBox.addView(title, new LinearLayout.LayoutParams(fill, wrap));
-            topBox.addView(speaking, chipParams());
             addView(topBox, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP));
+            // The chip floats just under the name, over the picture's edge, and takes no room: nothing moves when the
+            // microphone goes on or off.
+            addView(speaking, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
             bottomBox.addView(cardBox, new LinearLayout.LayoutParams(fill, wrap));
             bottomBox.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
             bottomBox.addView(buttons, new LinearLayout.LayoutParams(fill, wrap));
@@ -366,6 +369,14 @@ final class DoorbellView extends FrameLayout {
     /** Portrait: the picture between the name and the controls, so the cards and buttons never cover it. */
     private void placeVideo() {
         if (landscape) return;
+        if (!overlay && speaking.getLayoutParams() instanceof LayoutParams) {
+            LayoutParams chip = (LayoutParams) speaking.getLayoutParams();
+            int below = topBox.getHeight() + theme.px(4);
+            if (chip.topMargin != below) {
+                chip.topMargin = below;
+                speaking.setLayoutParams(chip);
+            }
+        }
         LayoutParams params = (LayoutParams) video.getLayoutParams();
         int top = topBox.getHeight(), bottom = bottomBox.getHeight();
         // The overlay layout, or a screen too low for both, gets the picture behind the controls.
@@ -541,7 +552,7 @@ final class DoorbellView extends FrameLayout {
         boolean changed = state != this.state;
         boolean answered = changed && this.state == State.RINGING;
         this.state = state;
-        if (state != State.IN_CALL || !micOn) talking = false;  // the plugin stops push to talk with the call
+        if (state == State.IDLE) talking = false;  // the plugin stops push to talk with the call
         this.speakerOn = speakerOn;
         this.micOn = micOn;
         render();
@@ -565,15 +576,24 @@ final class DoorbellView extends FrameLayout {
         if (opens || closes) slideVolume(opens);
         else if (speakerOn) volumeRow.setVisibility(controlsHidden ? INVISIBLE : VISIBLE);
         else volumeRow.setVisibility(overlay ? GONE : INVISIBLE);
+        // Rebuilding the buttons would take Hold to talk away from under the finger, and lose its release: wait.
+        if (talking) {
+            renderPending = true;
+            return;
+        }
         // Every position keeps one job: left (top) answers, then is the microphone; middle is the speaker; right
         // (bottom) hangs up.
         // Speaker and microphone are toggles: the same icon and label, the circle shows whether they are on.
         buttons.removeAllViews();
-        View first = state == State.IN_CALL
-            ? pushToTalk && micOn ? holdButton() : makeButton("mdi:microphone", texts.microphone(), Style.TOGGLE, micOn, callback::toggleMic)
-            : makeButton("mdi:phone", texts.answer(), Style.ANSWER, false, callback::answer);
+        // Push to talk: holding answers and talks at once, so the button is there from the ring on.
+        View first = pushToTalk
+            ? holdButton()
+            : state == State.IN_CALL
+                ? makeButton("mdi:microphone", texts.microphone(), Style.TOGGLE, micOn, callback::toggleMic)
+                : makeButton("mdi:phone", texts.answer(), Style.ANSWER, false, callback::answer);
         View speaker = makeButton("mdi:volume-high", texts.speaker(), Style.TOGGLE, speakerOn, state == State.RINGING ? callback::speaker : callback::toggleSpeaker);
-        View last = makeButton("mdi:phone-hangup", state == State.IN_CALL ? texts.endCall() : texts.hangUp(), Style.HANG_UP, false, callback::hangUp);
+        // Push to talk has no ringing screen of its own: Hold to talk answers, so End call is what this button does.
+        View last = makeButton("mdi:phone-hangup", state == State.IN_CALL || pushToTalk ? texts.endCall() : texts.hangUp(), Style.HANG_UP, false, callback::hangUp);
         int wrap = LinearLayout.LayoutParams.WRAP_CONTENT, fill = LinearLayout.LayoutParams.MATCH_PARENT;
         if (landscape && columnLevel >= 1) {
             // A low column: Speaker on top, the other two side by side, each keeping its place from the other layouts.
@@ -694,13 +714,15 @@ final class DoorbellView extends FrameLayout {
         if (now) removeCallbacks(hideControls);  // never hide what the finger is on
         else scheduleHide();
         safely(() -> callback.holdToTalk(now));
+        if (!now && renderPending) {
+            renderPending = false;
+            render();
+        }
     }
 
-    /** Push to talk keeps the chip's room in a call, so the picture does not jump each time the button goes down. */
     private int speakingVisibility() {
-        if (state != State.IN_CALL || !micOn) return GONE;
-        if (!pushToTalk || talking) return VISIBLE;
-        return INVISIBLE;
+        if (pushToTalk) return talking ? VISIBLE : GONE;
+        return state == State.IN_CALL && micOn ? VISIBLE : GONE;
     }
 
     private static TextView findCircle(View column) {
