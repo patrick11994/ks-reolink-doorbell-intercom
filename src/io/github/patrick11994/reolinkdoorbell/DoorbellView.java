@@ -121,6 +121,7 @@ final class DoorbellView extends FrameLayout {
     private boolean pushToTalk;  // the Talk mode setting: in a call the microphone button is held to talk
     private boolean talking;  // push to talk is held right now
     private boolean renderPending;  // the buttons changed while Hold to talk was held
+    private boolean arrangePending, pendingWide;  // the layout changed while Hold to talk was held
     private long talkDownAt;
     private boolean talkHint;  // the chip shows how push to talk works, after a tap too short to say anything
     private static final long SHORT_TAP_MILLIS = 400;
@@ -274,6 +275,12 @@ final class DoorbellView extends FrameLayout {
 
     /** Places the name, chip, slider and buttons for portrait or landscape. */
     private void arrange(boolean wide) {
+        // Moving the buttons would detach Hold to talk from under the finger, which cancels the hold: wait.
+        if (talking) {
+            arrangePending = true;
+            pendingWide = wide;
+            return;
+        }
         arranged = getWidth() > 0;
         landscape = wide;
         for (View piece : new View[] {title, speaking, volumeRow, buttons, spacer, cardBox, hint, topRow}) detach(piece);
@@ -786,7 +793,13 @@ final class DoorbellView extends FrameLayout {
         if (now) removeCallbacks(hideControls);  // never hide what the finger is on
         else scheduleHide();
         safely(() -> callback.holdToTalk(now));
-        if (!now && renderPending) {
+        if (!now && arrangePending) {
+            arrangePending = false;
+            renderPending = false;
+            arrange(pendingWide);
+            applyPadding();
+            render();
+        } else if (!now && renderPending) {
             renderPending = false;
             render();
         }
