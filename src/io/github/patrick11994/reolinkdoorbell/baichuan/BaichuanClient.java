@@ -36,6 +36,8 @@ public final class BaichuanClient {
     private static final Pattern NONCE = Pattern.compile("<nonce>([^<]+)</nonce>");
     private static final boolean TRACE = Boolean.getBoolean("baichuan.trace");  // -Dbaichuan.trace=true for the Mac-side live check
     private static final Pattern SIG_VER = Pattern.compile("<sigVer>([^<]+)</sigVer>");
+    private static final long FIRST_RETRY = 2_000;
+    private static final long MAX_RETRY = 8_000;
 
     private final String host;
     private final int port;
@@ -93,29 +95,32 @@ public final class BaichuanClient {
     }
 
     private void run() {
-        long backoff = 2_000;
+        long backoff = FIRST_RETRY;
         while (running) {
             connectedSince = 0;
+            boolean refused = false;
             try {
                 listener.onConnection(false, "connecting");
                 session();
-            } catch (LoginRefused refused) {
-                listener.onConnection(false, refused.getMessage());
-                backoff = 60_000;  // wrong credentials: do not hammer the doorbell's login limiter
+            } catch (LoginRefused error) {
+                listener.onConnection(false, error.getMessage());
+                refused = true;
             } catch (IOException | RuntimeException error) {
                 if (running) listener.onConnection(false, describe(error));
             } finally {
                 closeSocket();
             }
             // A session that held for a minute was healthy: start the backoff over.
-            if (connectedSince > 0 && System.currentTimeMillis() - connectedSince > 60_000) backoff = 2_000;
+            if (connectedSince > 0 && System.currentTimeMillis() - connectedSince > 60_000) backoff = FIRST_RETRY;
             if (!running) break;
             try {
-                Thread.sleep(backoff);
+                // Wrong credentials: do not hammer the doorbell's login limiter. Anything else: rings are being
+                // missed, so keep retrying often enough to be back within seconds of the doorbell.
+                Thread.sleep(refused ? 60_000 : backoff);
             } catch (InterruptedException e) {
                 break;
             }
-            backoff = Math.min(30_000, backoff * 2);
+            if (!refused) backoff = Math.min(MAX_RETRY, backoff * 2);
         }
     }
 
