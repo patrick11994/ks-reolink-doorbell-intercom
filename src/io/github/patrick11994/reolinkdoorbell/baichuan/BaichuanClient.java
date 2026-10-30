@@ -128,6 +128,7 @@ public final class BaichuanClient {
     private void session() throws IOException {
         Socket s = new Socket();
         socket = s;
+        if (!running) throw new IOException("stopped");  // stop() ran before it could see this socket
         DataInputStream in = connect(s);
         OutputStream out = s.getOutputStream();
         login(in, out);
