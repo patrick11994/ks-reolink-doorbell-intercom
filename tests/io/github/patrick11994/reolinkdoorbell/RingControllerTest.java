@@ -35,6 +35,7 @@ public final class RingControllerTest {
         speakerStopsCountdown();
         manualOpenDoesNotRing();
         manualOpenNeverAutoCloses();
+        talkInAViewerOpenedByHand();
         callEndsAtMaximumLength();
         pressDuringCallDoesNotRing();
         System.out.println("RingControllerTest passed");
@@ -43,6 +44,25 @@ public final class RingControllerTest {
     private static RingController controller(Recorder recorder) {
         now = START;
         return new RingController(recorder, () -> now, 60_000);
+    }
+
+    /** Push to talk in a viewer opened by hand: the hold must open the microphone, not be ignored as already in a call. */
+    static void talkInAViewerOpenedByHand() {
+        Recorder r = new Recorder();
+        RingController c = controller(r);
+        c.open();
+        r.take();
+        c.talk();
+        check(r.take(), "audio speaker=false mic=true, update IN_CALL speaker=false mic=true");
+        c.talk();  // the next hold: already on
+        check(r.take(), "");
+        c.hangUp();
+        check(r.take(), "audio speaker=false mic=false, close");
+
+        c.onVisitor(true);  // while it rings, the hold answers
+        r.take();
+        c.talk();
+        check(r.take(), "countdown off, audio speaker=true mic=true, update IN_CALL speaker=true mic=true");
     }
 
     static void onlyRisingEdgeRings() {
