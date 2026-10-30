@@ -71,7 +71,7 @@ public final class TextsTest {
         files.put("i18n/languages.properties", "en=English\npt-BR=Português (Brasil)\npt=Português\n");
         files.put("i18n/en.properties", "answer=Answer\nspeaker=Speaker\nconnectedTo=Connected to {name}\n");
         files.put("i18n/pt-BR.properties", "# só um começo\nanswer=Atender\nconnectedTo=Conectado a {name}\n");
-        files.put("i18n/pt.properties", "answer=Atender\n");
+        files.put("i18n/pt.properties", "answer=Atender\nspeaker: Altifalante\nendCall Terminar\n");  // all three separators
         Texts.setAssets(name -> {
             String file = files.get(name);
             if (file == null) throw new FileNotFoundException(name);
@@ -82,6 +82,9 @@ public final class TextsTest {
         check(portuguese.speaker(), "Speaker");
         check(portuguese.connectedTo("Portão"), "Conectado a Portão");
         check(portuguese.endCall(), "endCall");  // neither has it: the key shows, so the gap is seen
+        Texts european = Texts.of("Português");
+        check(european.speaker(), "Altifalante");
+        check(european.endCall(), "Terminar");
         check(Texts.forLocale(new Locale("pt", "BR")), "pt-BR");
         check(Texts.forLocale(new Locale("pt", "PT")), "pt");
         check(Texts.forLocale(new Locale("fr", "FR")), "en");

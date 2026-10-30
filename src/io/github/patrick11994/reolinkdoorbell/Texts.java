@@ -107,6 +107,10 @@ final class Texts {
             String key = line.substring(0, equals).trim();
             if (properties.containsKey(key)) texts.put(key, properties.getProperty(key));
         }
+        // Lines the scan above cannot split (key: value, key value, a key continued over lines) still count, at the end.
+        for (String key : properties.stringPropertyNames()) {
+            if (!texts.containsKey(key)) texts.put(key, properties.getProperty(key));
+        }
         return texts;
     }
 
