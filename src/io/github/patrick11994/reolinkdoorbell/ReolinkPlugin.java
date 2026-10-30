@@ -638,8 +638,22 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }
     }
 
-    /** Push to talk: the door hears you only while the button is held, and you hear the door turned down meanwhile. */
-    private synchronized void holdToTalk(boolean pressed) {
+    /**
+     * Push to talk: the door hears you only while the button is held, and you hear the door turned down meanwhile.
+     * Held while it rings, it answers first. That runs outside this lock: the controller calls back into it.
+     */
+    private void holdToTalk(boolean pressed) {
+        RingController c = controller;
+        if (pressed && c != null && c.state() != State.IN_CALL) {
+            synchronized (this) {
+                talking = true;  // so the microphone that answering opens starts unmuted, and the door ducked
+            }
+            c.answer();
+        }
+        pushToTalk(pressed);
+    }
+
+    private synchronized void pushToTalk(boolean pressed) {
         talking = pressed;
         if (mic != null) mic.setMuted(!pressed);
         if (unduck != null) unduck.cancel(false);
