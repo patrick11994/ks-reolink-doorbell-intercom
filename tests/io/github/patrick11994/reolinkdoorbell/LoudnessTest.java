@@ -15,6 +15,11 @@ public final class LoudnessTest {
         for (int p = 1; p <= 100; p++) {
             if (!(Loudness.gain(p) > Loudness.gain(p - 1))) throw new AssertionError("not rising at " + p);
         }
+        // Android set part of the level: the plugin turns down only the rest.
+        near(Loudness.remaining(50, 100), Loudness.gain(50));  // fixed volume: all of it
+        near(Loudness.remaining(50, 70), Loudness.gain(50) / Loudness.gain(70));
+        near(Loudness.remaining(50, 30), 1f);  // Android went lower than wanted: never boosted
+        near(Loudness.remaining(50, 0), 1f);
         // Ducking: well down, but the visitor stays audible.
         near(Loudness.DUCK, 0.2f);
         System.out.println("LoudnessTest passed");
