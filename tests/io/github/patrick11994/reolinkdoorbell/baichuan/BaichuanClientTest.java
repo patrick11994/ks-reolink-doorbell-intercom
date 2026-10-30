@@ -25,6 +25,7 @@ public final class BaichuanClientTest {
     public static void main(String[] args) throws Exception {
         cryptoMatchesReolinkAio();
         alarmParsing();
+        framingIsBounded();
         loginSubscribeAndPush();
         silentDoorbellIsNoticed();
         stalledPushStillRings();
@@ -53,6 +54,39 @@ public final class BaichuanClientTest {
         String doctype = "<?xml version=\"1.0\"?><!DOCTYPE body [<!ENTITY x \"visitor\">]>" + push("&x;", "none").substring(push("&x;", "none").indexOf("<body>"));
         check(AlarmEvents.parse(doctype).isEmpty(), true);  // a DOCTYPE is refused outright
         check(AlarmEvents.parse(push("visitor", "none").replace("<body>", "<!doctype body><body>")).isEmpty(), true);
+    }
+
+    /** Framing against a broken or hostile peer: stray bytes resync, but sizes and garbage are bounded. */
+    static void framingIsBounded() throws IOException {
+        byte[] ring = reply24(33, 7, 200, new byte[] {1, 2, 3});
+        byte[] stray = new byte[5 + ring.length];
+        System.arraycopy(ring, 0, stray, 5, ring.length);
+        check(BcMessage.read(stream(stray)).messageId, 7);
+        check(fails(header(BcMessage.MAX_BODY + 1)), true);
+        check(fails(header(-1)), true);
+        check(fails(new byte[BcMessage.MAX_SKIP + 64]), true);
+    }
+
+    private static byte[] header(int length) {
+        byte[] message = reply24(33, 0, 200, new byte[0]);
+        for (int i = 0; i < 4; i++) message[8 + i] = (byte) (length >>> (8 * i));
+        return message;
+    }
+
+    private static DataInputStream stream(byte[] bytes) {
+        return new DataInputStream(new java.io.ByteArrayInputStream(bytes));
+    }
+
+    /** True when read refuses the bytes before running out of them, so it never waited for or allocated more. */
+    private static boolean fails(byte[] bytes) {
+        try {
+            BcMessage.read(stream(bytes));
+            return false;
+        } catch (java.io.EOFException ranOut) {
+            return false;
+        } catch (IOException refused) {
+            return true;
+        }
     }
 
     static void loginSubscribeAndPush() throws Exception {

@@ -16,6 +16,7 @@ final class BcMessage {
     static final int CLASS_MODERN_20 = 0x6614;  // "1466": 20-byte header
     static final int CLASS_ZERO = 0x0000;  // 24-byte header
     static final int MAX_BODY = 1024 * 1024;
+    static final int MAX_SKIP = 64 * 1024;
 
     final int command;
     final int messageId;  // channel byte + 24-bit counter, little-endian, as one int
@@ -66,10 +67,13 @@ final class BcMessage {
         return out.toByteArray();
     }
 
-    /** Reads one message, resynchronizing on the magic if stray bytes arrive. */
+    /** Reads one message, resynchronizing on the magic if stray bytes arrive, but not through an endless stream of them. */
     static BcMessage read(DataInputStream in) throws IOException {
         int magic = readInt(in);
-        while (magic != MAGIC) magic = (magic >>> 8) | ((in.readUnsignedByte()) << 24);
+        for (int skipped = 0; magic != MAGIC; skipped++) {
+            if (skipped >= MAX_SKIP) throw new IOException("no Baichuan message in " + MAX_SKIP + " bytes");
+            magic = (magic >>> 8) | ((in.readUnsignedByte()) << 24);
+        }
         int command = readInt(in);
         int length = readInt(in);
         int messageId = readInt(in);
