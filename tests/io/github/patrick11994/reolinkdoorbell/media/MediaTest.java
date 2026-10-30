@@ -149,17 +149,22 @@ public final class MediaTest {
         check(sizes.get(sizes.size() - 1), 6);
     }
 
-    /** An RTSP answer may not announce a giant body or send an endless header line. */
+    /** An RTSP answer may not announce a giant body, send an endless header line, endless headers or endless packets. */
     static void rtspRefusesHugeAnswers() {
         String[] answers = {
             "RTSP/1.0 200 OK\r\nCSeq: 1\r\nContent-Length: 10485760\r\n\r\n",
             "RTSP/1.0 200 OK\r\nCSeq: 1\r\nX-Junk: " + new String(new char[RtspSession.MAX_LINE + 10]).replace('\0', 'a') + "\r\n\r\n",
+            "RTSP/1.0 200 OK\r\nCSeq: 1\r\n" + new String(new char[RtspSession.MAX_HEADERS + 1]).replace("\0", "X-Junk: a\r\n") + "\r\n",
+            "$",  // interleaved packets, sent until the client hangs up
         };
         for (String answer : answers) {
             try (java.net.ServerSocket server = new java.net.ServerSocket(0)) {
                 Thread fake = new Thread(() -> {
                     try (java.net.Socket socket = server.accept()) {
                         socket.getInputStream().read(new byte[4096]);
+                        if (answer.equals("$")) {
+                            while (true) socket.getOutputStream().write(new byte[] {'$', 0, 0, 1, 0});
+                        }
                         socket.getOutputStream().write(answer.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
                         Thread.sleep(500);
                     } catch (Exception closed) {
@@ -168,6 +173,7 @@ public final class MediaTest {
                 });
                 fake.start();
                 RtspSession session = new RtspSession("127.0.0.1", server.getLocalPort(), "/x", "u", "p");
+                session.answerMillis = 500;
                 String outcome;
                 try {
                     session.describe(java.util.Collections.<String, String>emptyMap());

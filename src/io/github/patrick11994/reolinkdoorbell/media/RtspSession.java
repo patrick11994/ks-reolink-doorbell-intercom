@@ -34,6 +34,7 @@ public final class RtspSession {
     /** The most a device may make us allocate: it runs inside Kiosk Satellite, so a broken one must not take it down. */
     static final int MAX_BODY = 64 * 1024;
     static final int MAX_LINE = 8 * 1024;
+    static final int MAX_HEADERS = 100;
     private static final Pattern REALM = Pattern.compile("realm=\"([^\"]*)\"");
     private static final Pattern NONCE = Pattern.compile("nonce=\"([^\"]*)\"");
 
@@ -52,6 +53,7 @@ public final class RtspSession {
     private String contentBase;
     private volatile boolean closed;
     private Thread reader;
+    long answerMillis = 10_000;  // the most one answer may take, however it trickles in; tests shorten it
 
     public RtspSession(String host, int port, String path, String username, String password) {
         this(host, port, path, username, password, 10_000);
@@ -218,7 +220,7 @@ public final class RtspSession {
         for (int attempt = 0; attempt < 2; attempt++) {
             out.write(requestBytes(method, uri, extra));
             out.flush();
-            Response response = readResponse(in);
+            Response response = readResponse(in, System.currentTimeMillis() + answerMillis);
             if (response.status == 401 && realm == null) {
                 String challenge = response.headers.getOrDefault("www-authenticate", "");
                 Matcher r = REALM.matcher(challenge), n = NONCE.matcher(challenge);
@@ -263,10 +265,11 @@ public final class RtspSession {
         }
     }
 
-    /** Reads one response, skipping interleaved packets the server may send before it. */
-    private static Response readResponse(DataInputStream in) throws IOException {
+    /** Reads one response, skipping interleaved packets the server may send before it, all before the deadline. */
+    private static Response readResponse(DataInputStream in, long deadline) throws IOException {
         int first = in.read();
         while (first == '$') {
+            inTime(deadline);
             in.readUnsignedByte();
             int length = in.readUnsignedShort();
             in.skipBytes(length);
@@ -278,7 +281,10 @@ public final class RtspSession {
         String[] parts = status.split(" ");
         response.status = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
         int length = 0;
+        int count = 0;
         for (String line = line(in); !line.isEmpty(); line = line(in)) {
+            inTime(deadline);
+            if (++count > MAX_HEADERS) throw new IOException("RTSP answer has too many header lines");
             int colon = line.indexOf(':');
             if (colon <= 0) continue;
             String key = line.substring(0, colon).trim().toLowerCase(Locale.ROOT), value = line.substring(colon + 1).trim();
@@ -296,10 +302,16 @@ public final class RtspSession {
     private static void skipResponse(DataInputStream in) throws IOException {
         int length = 0;
         line(in);  // rest of the status line
+        int count = 0;
         for (String line = line(in); !line.isEmpty(); line = line(in)) {
+            if (++count > MAX_HEADERS) throw new IOException("RTSP answer has too many header lines");
             if (line.toLowerCase(Locale.ROOT).startsWith("content-length:")) length = contentLength(line.substring(15).trim());
         }
         in.skipBytes(length);
+    }
+
+    private static void inTime(long deadline) throws IOException {
+        if (System.currentTimeMillis() > deadline) throw new IOException("RTSP answer took too long");
     }
 
     private static int contentLength(String value) throws IOException {
