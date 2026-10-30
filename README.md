@@ -162,6 +162,17 @@ The card's colour follows the state the way Home Assistant does: a light that is
 | A card does nothing | Check its **Action**. The Logs say what happened (*card: … failed: …*). |
 | You hear nothing with Speaker on | Raise the slider on the call screen. It sets Android's call volume, which is separate from the media volume. Where Android does not let that change (the Logs then say *played by the plugin*), the plugin sets the level itself. |
 
+## Translations
+
+The call screen, the messages, the readings and the Check button's results come in English and Dutch, and more languages are welcome. Every language is one text file in [`assets/i18n`](assets/i18n), so no code is needed:
+
+1. Copy [`en.properties`](assets/i18n/en.properties) to a file named after the language code, such as `pt-BR.properties` for Brazilian Portuguese or `de.properties` for German.
+2. Translate everything after each `=`. Keep the words in braces, such as `{name}`, exactly as they are: the plugin fills them in.
+3. Add the language to [`languages.properties`](assets/i18n/languages.properties), as its code and its name in that language, such as `pt-BR=Português (Brasil)`, and add the same name to the **Language** setting's options in [`kiosk-satellite-plugin.json`](kiosk-satellite-plugin.json).
+4. Open a pull request. The tests check that the file only has the plugin's texts and keeps every placeholder.
+
+Texts a translation leaves out show in English. With **Language** on *Automatic*, the plugin follows the panel's Android language: a file for the language and region first (`pt-BR`), then the language (`pt`), then English. The settings page itself stays in English: Kiosk Satellite shows plugin settings as they are written.
+
 ## Building
 
 You need JDK 17 or newer, Python 3 and an Android SDK with a platform and build-tools. Set `JAVA_HOME` and `ANDROID_HOME`.
