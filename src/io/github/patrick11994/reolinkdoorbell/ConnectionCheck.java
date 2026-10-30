@@ -30,7 +30,16 @@ final class ConnectionCheck {
 
     private ConnectionCheck() {}
 
+    /** Always returns a result, so the settings page never stays on "Checking". */
     static Result run(String host, int baichuanPort, int rtspPort, String username, String password, Texts texts) {
+        try {
+            return checks(host, baichuanPort, rtspPort, username, password, texts);
+        } catch (RuntimeException error) {
+            return new Result(false, texts.checkFailed(describe(error)));
+        }
+    }
+
+    private static Result checks(String host, int baichuanPort, int rtspPort, String username, String password, Texts texts) {
         if (host.isEmpty() || username.isEmpty() || password.isEmpty()) return new Result(false, texts.checkNotConfigured());
         try {
             BaichuanClient.verify(host, baichuanPort, username, password);

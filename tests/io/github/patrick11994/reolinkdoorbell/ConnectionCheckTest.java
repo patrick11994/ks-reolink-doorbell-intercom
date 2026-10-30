@@ -26,6 +26,25 @@ public final class ConnectionCheckTest {
             check(refused.message, english.checkLoginRefused());
             doorbell.join(3000);
         }
+        // A device whose RTSP answer cannot be read still ends the check with a result.
+        try (ServerSocket server = new ServerSocket(0); ServerSocket rtsp = new ServerSocket(0)) {
+            Thread doorbell = new Thread(() -> BaichuanClientTest.fakeDoorbell(server, "real", new CopyOnWriteArrayList<>()));
+            Thread camera = new Thread(() -> {
+                try (java.net.Socket socket = rtsp.accept()) {
+                    socket.getInputStream().read(new byte[4096]);
+                    socket.getOutputStream().write("RTSP/1.0 abc OK\r\n\r\n".getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                    Thread.sleep(500);
+                } catch (Exception gone) {
+                    // The check hung up.
+                }
+            });
+            doorbell.start();
+            camera.start();
+            ConnectionCheck.Result garbled = ConnectionCheck.run("127.0.0.1", server.getLocalPort(), rtsp.getLocalPort(), BaichuanClientTest.USER, "real", english);
+            check(garbled.message, english.checkNoVideo());
+            doorbell.join(3000);
+            camera.join(3000);
+        }
         System.out.println("ConnectionCheckTest passed");
     }
 
