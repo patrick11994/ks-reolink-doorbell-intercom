@@ -36,7 +36,6 @@ public final class BaichuanClient {
     private static final Pattern NONCE = Pattern.compile("<nonce>([^<]+)</nonce>");
     private static final boolean TRACE = Boolean.getBoolean("baichuan.trace");  // -Dbaichuan.trace=true for the Mac-side live check
     private static final Pattern SIG_VER = Pattern.compile("<sigVer>([^<]+)</sigVer>");
-    private static final long FIRST_RETRY = 2_000;
     private static final long MAX_RETRY = 8_000;
 
     private final String host;
@@ -52,6 +51,7 @@ public final class BaichuanClient {
     private int counter;
     private byte[] aesKey;
     private long connectedSince;
+    long firstRetry = 2_000;  // set before start(); tests shorten it
 
     public BaichuanClient(String host, int port, String username, String password, Listener listener) {
         this(host, port, username, password, listener, 25_000, 5_000);
@@ -95,7 +95,7 @@ public final class BaichuanClient {
     }
 
     private void run() {
-        long backoff = FIRST_RETRY;
+        long backoff = firstRetry;
         while (running) {
             connectedSince = 0;
             boolean refused = false;
@@ -111,7 +111,7 @@ public final class BaichuanClient {
                 closeSocket();
             }
             // A session that held for a minute was healthy: start the backoff over.
-            if (connectedSince > 0 && System.currentTimeMillis() - connectedSince > 60_000) backoff = FIRST_RETRY;
+            if (connectedSince > 0 && System.currentTimeMillis() - connectedSince > 60_000) backoff = firstRetry;
             if (!running) break;
             try {
                 // Wrong credentials: do not hammer the doorbell's login limiter. Anything else: rings are being

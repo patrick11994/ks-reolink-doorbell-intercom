@@ -29,6 +29,8 @@ public final class BaichuanClientTest {
         loginSubscribeAndPush();
         silentDoorbellIsNoticed();
         stalledPushStillRings();
+        reconnectsAfterADrop(false);
+        reconnectsAfterADrop(true);
         wrongPasswordIsReported();
         verifyChecksTheLogin();
         System.out.println("BaichuanClientTest passed");
@@ -176,6 +178,42 @@ public final class BaichuanClientTest {
             doorbell.join(3000);
             check(rang, true);
             check(log.stream().filter(l -> l.startsWith("connection true")).count(), 1L);  // on the first session
+        }
+    }
+
+    /** The first session drops (closed, or silent like a power cut); the client logs in again and the next ring arrives. */
+    static void reconnectsAfterADrop(boolean silent) throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            CountDownLatch visitor = new CountDownLatch(1);
+            List<String> log = new CopyOnWriteArrayList<>();
+            Thread doorbell = new Thread(() -> {
+                try (Socket socket = server.accept()) {
+                    DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+                    if (fakeLogin(in, socket.getOutputStream(), PASSWORD, log) == null) return;
+                    BcMessage.read(in);  // the subscribe
+                    if (silent) {
+                        socket.setSoTimeout(3000);
+                        while (true) BcMessage.read(in);  // never answers; ends when the client gives up
+                    }
+                } catch (Exception gone) {
+                    // The first session is over.
+                }
+                fakeDoorbell(server, PASSWORD, log);
+            });
+            doorbell.start();
+            BaichuanClient client = new BaichuanClient("127.0.0.1", server.getLocalPort(), USER, PASSWORD, new BaichuanClient.Listener() {
+                @Override public void onConnection(boolean connected, String detail) { log.add("connection " + connected + " " + detail); }
+                @Override public void onAlarm(AlarmEvents.Event event) { if (event.visitor()) visitor.countDown(); }
+            }, 200, 2000);
+            client.firstRetry = 100;
+            client.start();
+            boolean rang = visitor.await(5, TimeUnit.SECONDS);
+            client.stop();
+            doorbell.join(3000);
+            check(rang, true);
+            check(log.stream().filter(l -> l.equals("login ok")).count(), 2L);
+            int firstUp = log.indexOf("connection true connected");
+            check(log.subList(firstUp, log.size()).stream().anyMatch(l -> l.startsWith("connection false") && !l.endsWith("connecting")), true);
         }
     }
 
