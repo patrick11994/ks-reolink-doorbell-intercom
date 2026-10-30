@@ -35,6 +35,7 @@ public final class RtspSession {
     static final int MAX_BODY = 64 * 1024;
     static final int MAX_LINE = 8 * 1024;
     static final int MAX_HEADERS = 100;
+    static final long STALL_MILLIS = 5_000;
     private static final Pattern REALM = Pattern.compile("realm=\"([^\"]*)\"");
     private static final Pattern NONCE = Pattern.compile("nonce=\"([^\"]*)\"");
 
@@ -107,7 +108,15 @@ public final class RtspSession {
 
     /** Starts the reader thread; from here on the RTSP answers to keepalives are read and dropped by it. */
     public synchronized void start(Listener listener, String threadName) {
-        Thread thread = new Thread(() -> read(listener), threadName);
+        start(listener, threadName, 0);
+    }
+
+    /**
+     * As start, but the session ends when no packet arrives for silenceMillis: a stream that should flow but has
+     * stopped (a half-open connection keeps accepting the keepalives for minutes). 0 waits forever, for a backchannel.
+     */
+    public synchronized void start(Listener listener, String threadName, long silenceMillis) {
+        Thread thread = new Thread(() -> read(listener, silenceMillis), threadName);
         thread.setDaemon(true);
         reader = thread;
         thread.start();
@@ -156,10 +165,12 @@ public final class RtspSession {
         }
     }
 
-    private void read(Listener listener) {
+    private void read(Listener listener, long silenceMillis) {
         String reason = null;
         byte[] buffer = new byte[65536];
+        byte[] header = new byte[3];
         long lastKeepalive = System.currentTimeMillis();
+        long lastPacket = lastKeepalive;
         try {
             socket.setSoTimeout(1000);
             while (!closed) {
@@ -173,13 +184,18 @@ public final class RtspSession {
                 try {
                     first = in.read();
                 } catch (SocketTimeoutException quiet) {
+                    if (silenceMillis > 0 && System.currentTimeMillis() - lastPacket > silenceMillis) throw new IOException("the stream stopped");
                     continue;
                 }
                 if (first < 0) throw new IOException("the doorbell closed the stream");
                 if (first == '$') {
-                    int channel = in.readUnsignedByte();
-                    int length = in.readUnsignedShort();
-                    in.readFully(buffer, 0, length);
+                    // The one-second timeout only polls between packets: inside one, a Wi-Fi stall is waited out.
+                    long deadline = System.currentTimeMillis() + STALL_MILLIS;
+                    readFully(in, header, 3, deadline);
+                    int channel = header[0] & 0xFF;
+                    int length = ((header[1] & 0xFF) << 8) | (header[2] & 0xFF);
+                    readFully(in, buffer, length, deadline);
+                    lastPacket = System.currentTimeMillis();
                     listener.onPacket(channel, buffer, 0, length);
                 } else if (first == 'R') {
                     skipResponse(in);  // an answer to a keepalive
@@ -195,6 +211,22 @@ public final class RtspSession {
                 // Already closed.
             }
             listener.onClosed(reason);
+        }
+    }
+
+    /** readFully that keeps its progress across poll timeouts, up to the deadline. */
+    private static void readFully(InputStream in, byte[] buffer, int length, long deadline) throws IOException {
+        int done = 0;
+        while (done < length) {
+            int n;
+            try {
+                n = in.read(buffer, done, length - done);
+            } catch (SocketTimeoutException stall) {
+                if (System.currentTimeMillis() > deadline) throw new IOException("the stream stalled in the middle of a packet");
+                continue;
+            }
+            if (n < 0) throw new IOException("the doorbell closed the stream");
+            done += n;
         }
     }
 

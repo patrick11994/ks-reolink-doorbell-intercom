@@ -102,7 +102,7 @@ public final class StreamHub implements MediaStream {
                 @Override public void onClosed(String reason) {
                     if (reason != null && running) listener.onStreamState("stream ended: " + reason);
                 }
-            }, "reolink-stream");
+            }, "reolink-stream", 5_000);  // video flows many times a second: 5 s without a packet is a dead stream
         } catch (Exception error) {
             s.close();
             if (running) listener.onStreamState("stream failed: " + (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()));
