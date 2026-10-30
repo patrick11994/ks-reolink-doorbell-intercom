@@ -27,6 +27,7 @@ public final class BaichuanClientTest {
         alarmParsing();
         loginSubscribeAndPush();
         silentDoorbellIsNoticed();
+        stalledPushStillRings();
         wrongPasswordIsReported();
         verifyChecksTheLogin();
         System.out.println("BaichuanClientTest passed");
@@ -103,6 +104,44 @@ public final class BaichuanClientTest {
             doorbell.join(3000);
             check(noticed, true);
             check(log.stream().filter(l -> l.startsWith("ignored")).count() >= 2, true);  // it did keep trying first
+        }
+    }
+
+    /** A push that stalls halfway (a Wi-Fi retransmission) is waited for, not dropped as an idle second. */
+    static void stalledPushStillRings() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            CountDownLatch visitor = new CountDownLatch(1);
+            List<String> log = new CopyOnWriteArrayList<>();
+            Thread doorbell = new Thread(() -> {
+                try (Socket socket = server.accept()) {
+                    DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+                    OutputStream out = socket.getOutputStream();
+                    byte[] key = fakeLogin(in, out, PASSWORD, log);
+                    if (key == null) return;
+                    BcMessage.read(in);  // the subscribe
+                    byte[] ring = reply24(33, 0, 200, BcCrypto.aes(key, push("visitor", "none").getBytes(StandardCharsets.UTF_8), true));
+                    out.write(ring, 0, 30);
+                    out.flush();
+                    Thread.sleep(1500);
+                    out.write(ring, 30, ring.length - 30);
+                    out.flush();
+                    socket.setSoTimeout(3000);
+                    while (true) BcMessage.read(in);
+                } catch (Exception closed) {
+                    // The client stopped.
+                }
+            });
+            doorbell.start();
+            BaichuanClient client = new BaichuanClient("127.0.0.1", server.getLocalPort(), USER, PASSWORD, new BaichuanClient.Listener() {
+                @Override public void onConnection(boolean connected, String detail) { log.add("connection " + connected + " " + detail); }
+                @Override public void onAlarm(AlarmEvents.Event event) { if (event.visitor()) visitor.countDown(); }
+            }, 25_000, 3000);
+            client.start();
+            boolean rang = visitor.await(5, TimeUnit.SECONDS);
+            client.stop();
+            doorbell.join(3000);
+            check(rang, true);
+            check(log.stream().filter(l -> l.startsWith("connection true")).count(), 1L);  // on the first session
         }
     }
 
