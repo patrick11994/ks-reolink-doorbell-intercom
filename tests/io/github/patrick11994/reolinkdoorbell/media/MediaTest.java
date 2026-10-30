@@ -104,6 +104,15 @@ public final class MediaTest {
         check(frames.size(), 2);
         check(frames.get(0), "5000:010203");
         check(frames.get(1), "6024:0405");
+
+        // A hostile SDP (sizelength=31) with an all-ones size must not allocate: the widths fall back to 13/3.
+        frames.clear();
+        AacDepacketizer hostile = new AacDepacketizer((frame, ts) -> frames.add(hex(frame)), 31, 1);
+        byte[] huge = {0, 32, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFE, 1, 2, 3, 4};
+        hostile.onRtp(rtp(1, 0, true, huge), 0, 12 + huge.length);
+        check(frames.isEmpty(), true);
+        new AacDepacketizer((frame, ts) -> frames.add(hex(frame)), 40, 3).onRtp(rtp(1, 0, true, huge), 0, 12 + huge.length);
+        check(frames.isEmpty(), true);
     }
 
     /** A sink attaching late gets the cached frames from the last keyframe, then live ones, each once. */
