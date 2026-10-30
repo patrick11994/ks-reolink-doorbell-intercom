@@ -3,6 +3,7 @@ package io.github.patrick11994.reolinkdoorbell.baichuan;
 
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -138,9 +139,11 @@ public final class BaichuanClient {
         long lastSent = lastReceived;
         boolean pushesSeen = false;
         while (running) {
-            BcMessage message;
             try {
-                message = trace(BcMessage.read(in));
+                // The short timeout only polls for the next message; it must not cut one that has started.
+                in.mark(1);
+                if (in.read() < 0) throw new EOFException("the doorbell closed the connection");
+                in.reset();
             } catch (SocketTimeoutException quiet) {
                 long now = System.currentTimeMillis();
                 if (now - Math.max(lastReceived, lastSent) > keepaliveMillis) {
@@ -154,6 +157,14 @@ public final class BaichuanClient {
                 if (now - lastReceived > 3 * keepaliveMillis) throw new IOException("the doorbell stopped answering");
                 continue;
             }
+            BcMessage message;
+            s.setSoTimeout(timeoutMillis);
+            try {
+                message = trace(BcMessage.read(in));
+            } catch (SocketTimeoutException stalled) {
+                throw new IOException("the doorbell stopped in the middle of a message");
+            }
+            s.setSoTimeout(1000);
             lastReceived = System.currentTimeMillis();
             if (message.command == CMD_ALARM) {
                 pushesSeen = true;
