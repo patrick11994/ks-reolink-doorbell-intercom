@@ -13,6 +13,7 @@ import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.Surface;
@@ -95,6 +96,10 @@ final class DoorbellView extends FrameLayout {
     /** Landscape cards join the button column only if the buttons can stay at least this big. */
     private static final int MIN_BUTTON_WITH_CARDS_DP = 64;
     private boolean cardsRight;  // landscape: the cards above the buttons, instead of in their own column on the left
+    // Landscape, by what the column measures once Kiosk Satellite has drawn it in its own font and scale: 0 the
+    // buttons stacked, 1 Speaker above Answer (later Microphone) and Hang up side by side, 2 the same without labels.
+    private int columnLevel;
+    private static final int LOW_BUTTON_DP = 56;
     private int columnPx;  // landscape: each column's width, SIDE_DP plus its share of what the picture leaves
     // A nearly square screen (an NSPanel Pro) has no room beside the picture: it fills the screen, the controls float
     // over it on dark gradients, the cards become a row of round buttons, and during a call the controls hide.
@@ -219,10 +224,11 @@ final class DoorbellView extends FrameLayout {
         boolean right = wide && cardsFitRight(height);
         boolean square = !wide && height < width * OVERLAY_ASPECT;
         int size = square ? OVERLAY_BUTTON_DP : buttonDpFor(wide, height, right);
-        if (wide != landscape || size != buttonDp || right != cardsRight || square != overlay || !arranged) {
+        if (wide != landscape || size != buttonDp || right != cardsRight || square != overlay || !arranged || height != oldHeight) {
             buttonDp = size;
             cardsRight = right;
             overlay = square;
+            columnLevel = 0;
             post(() -> {
                 arrange(wide);
                 applyPadding();
@@ -553,11 +559,58 @@ final class DoorbellView extends FrameLayout {
         // (bottom) hangs up.
         // Speaker and microphone are toggles: the same icon and label, the circle shows whether they are on.
         buttons.removeAllViews();
-        if (state == State.IN_CALL) addButton("mdi:microphone", texts.microphone(), Style.TOGGLE, micOn, callback::toggleMic);
-        else addButton("mdi:phone", texts.answer(), Style.ANSWER, false, callback::answer);
-        addButton("mdi:volume-high", texts.speaker(), Style.TOGGLE, speakerOn, state == State.RINGING ? callback::speaker : callback::toggleSpeaker);
-        addButton("mdi:phone-hangup", state == State.IN_CALL ? texts.endCall() : texts.hangUp(), Style.HANG_UP, false, callback::hangUp);
+        View first = state == State.IN_CALL
+            ? makeButton("mdi:microphone", texts.microphone(), Style.TOGGLE, micOn, callback::toggleMic)
+            : makeButton("mdi:phone", texts.answer(), Style.ANSWER, false, callback::answer);
+        View speaker = makeButton("mdi:volume-high", texts.speaker(), Style.TOGGLE, speakerOn, state == State.RINGING ? callback::speaker : callback::toggleSpeaker);
+        View last = makeButton("mdi:phone-hangup", state == State.IN_CALL ? texts.endCall() : texts.hangUp(), Style.HANG_UP, false, callback::hangUp);
+        int wrap = LinearLayout.LayoutParams.WRAP_CONTENT, fill = LinearLayout.LayoutParams.MATCH_PARENT;
+        if (landscape && columnLevel >= 1) {
+            // A low column: Speaker on top, the other two side by side, each keeping its place from the other layouts.
+            buttons.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout top = new LinearLayout(getContext());
+            top.setGravity(Gravity.CENTER_HORIZONTAL);
+            top.addView(speaker, new LinearLayout.LayoutParams(wrap, wrap));
+            LinearLayout bottom = new LinearLayout(getContext());
+            bottom.setOrientation(LinearLayout.HORIZONTAL);
+            bottom.addView(first, new LinearLayout.LayoutParams(0, wrap, 1));
+            bottom.addView(last, new LinearLayout.LayoutParams(0, wrap, 1));
+            buttons.addView(top, new LinearLayout.LayoutParams(fill, wrap));
+            buttons.addView(bottom, new LinearLayout.LayoutParams(fill, wrap));
+        } else {
+            for (View button : new View[] {first, speaker, last}) {
+                LinearLayout.LayoutParams place = landscape ? new LinearLayout.LayoutParams(fill, wrap) : new LinearLayout.LayoutParams(0, wrap, 1);
+                if (landscape) place.topMargin = theme.px(4);
+                buttons.addView(button, place);
+            }
+        }
         if (controlsHidden) buttons.setVisibility(INVISIBLE);
+        if (landscape) post(this::fitColumn);
+    }
+
+    /**
+     * Landscape: if the column does not fit the screen's height, measured as drawn, first the cards go back to their
+     * own column, then the buttons take the low layout, then they lose their labels. A screen's size starts it over.
+     */
+    private void fitColumn() {
+        if (!landscape || !arranged || getHeight() == 0) return;
+        side.measure(MeasureSpec.makeMeasureSpec(side.getWidth() > 0 ? side.getWidth() : columnPx, MeasureSpec.EXACTLY),
+            MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+        if (side.getMeasuredHeight() <= getHeight()) return;
+        if (cardsRight) {
+            cardsRight = false;
+            buttonDp = buttonDpFor(true, getHeight(), false);
+            arrange(true);
+            applyPadding();
+        } else if (columnLevel < 2) {
+            columnLevel++;
+            buttonDp = LOW_BUTTON_DP;
+        } else if (buttonDp > 48) {
+            buttonDp = 48;
+        } else {
+            return;  // as small as it goes
+        }
+        render();
     }
 
     private ValueAnimator volumeSlide;
@@ -598,7 +651,7 @@ final class DoorbellView extends FrameLayout {
 
     private enum Style { ANSWER, TOGGLE, HANG_UP }
 
-    private void addButton(String icon, String label, Style style, boolean active, Runnable action) {
+    private View makeButton(String icon, String label, Style style, boolean active, Runnable action) {
         Context context = getContext();
         LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
@@ -641,14 +694,16 @@ final class DoorbellView extends FrameLayout {
         caption.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         captionParams.topMargin = theme.px(2);
-        column.addView(caption, captionParams);
+        if (landscape && columnLevel >= 1) {
+            // Side by side in a narrow column: one line, shrinking to fit rather than wrapping.
+            captionParams.width = LinearLayout.LayoutParams.MATCH_PARENT;
+            caption.setMaxLines(1);
+            caption.setAutoSizeTextTypeUniformWithConfiguration(9, 14, 1, TypedValue.COMPLEX_UNIT_SP);
+        }
+        if (!(landscape && columnLevel >= 2)) column.addView(caption, captionParams);
         column.setOnClickListener(v -> safely(action));
         circle.setOnClickListener(v -> safely(action));
-        LinearLayout.LayoutParams place = landscape
-            ? new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            : new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
-        if (landscape) place.topMargin = theme.px(4);
-        buttons.addView(column, place);
+        return column;
     }
 
     // Cards
