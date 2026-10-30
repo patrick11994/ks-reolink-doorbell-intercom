@@ -121,6 +121,10 @@ final class DoorbellView extends FrameLayout {
     private boolean pushToTalk;  // the Talk mode setting: in a call the microphone button is held to talk
     private boolean talking;  // push to talk is held right now
     private boolean renderPending;  // the buttons changed while Hold to talk was held
+    private long talkDownAt;
+    private boolean talkHint;  // the chip shows how push to talk works, after a tap too short to say anything
+    private static final long SHORT_TAP_MILLIS = 400;
+    private final Runnable endTalkHint = this::endTalkHint;
 
     DoorbellView(Context context, KsTheme theme, Texts texts, String name, State state, int volumePercent, Callback callback) {
         super(context);
@@ -566,8 +570,10 @@ final class DoorbellView extends FrameLayout {
     private void render() {
         // Just the name: the chime, the picture and the buttons already say what is going on.
         title.setText(name);
-        speaking.setVisibility(speakingVisibility());
-        speaking.setText(texts.microphoneActive());
+        if (!talkHint) {
+            speaking.setVisibility(speakingVisibility());
+            speaking.setText(texts.microphoneActive());
+        }
         // The slider's room stays, so nothing jumps when the speaker turns on: not the picture in portrait, nor the cards
         // and buttons in the landscape column (whose button size already counts the slider). The overlay has nothing
         // to keep still, so there the cards sit on the buttons until the slider comes.
@@ -705,12 +711,17 @@ final class DoorbellView extends FrameLayout {
     private void setTalking(boolean now, TextView circle) {
         if (talking == now) return;
         talking = now;
+        if (now) {
+            talkDownAt = System.currentTimeMillis();
+            if (talkHint) endTalkHint();
+        }
         if (circle != null) {
             ((GradientDrawable) circle.getBackground()).setColor(now ? Color.WHITE : 0x59FFFFFF);
             Drawable[] drawables = circle.getCompoundDrawables();
             if (drawables[0] != null) drawables[0].setTint(now ? 0xFF202124 : Color.WHITE);
         }
         speaking.setVisibility(speakingVisibility());
+        if (!now && System.currentTimeMillis() - talkDownAt < SHORT_TAP_MILLIS) showTalkHint();
         if (now) removeCallbacks(hideControls);  // never hide what the finger is on
         else scheduleHide();
         safely(() -> callback.holdToTalk(now));
@@ -723,6 +734,24 @@ final class DoorbellView extends FrameLayout {
     private int speakingVisibility() {
         if (pushToTalk) return talking ? VISIBLE : GONE;
         return state == State.IN_CALL && micOn ? VISIBLE : GONE;
+    }
+
+    /** A tap too short to talk: the chip says, in grey rather than the microphone's red, to hold the button. */
+    private void showTalkHint() {
+        removeCallbacks(endTalkHint);
+        talkHint = true;
+        ((GradientDrawable) speaking.getBackground()).setColor(0xE6202124);
+        speaking.setText(texts.holdToTalkHint());
+        speaking.setVisibility(VISIBLE);
+        postDelayed(endTalkHint, FEEDBACK_MILLIS);
+    }
+
+    private void endTalkHint() {
+        removeCallbacks(endTalkHint);
+        talkHint = false;
+        ((GradientDrawable) speaking.getBackground()).setColor(safeColor("error", 0xFFB3261E));
+        speaking.setText(texts.microphoneActive());
+        speaking.setVisibility(speakingVisibility());
     }
 
     private static TextView findCircle(View column) {
