@@ -42,17 +42,24 @@ final class MicCapture {
     private final String choice;
     private final int[] rates;
     private volatile boolean running = true;
+    private volatile boolean muted;  // push to talk: open, but nothing goes to the door until the button is held
     private final Thread thread;
 
     /** choice is the Microphone setting (one of CHOICES, or Automatic), rateChoice the sample rate one (one of RATE_CHOICES, or Automatic). */
-    MicCapture(TalkChannel talk, String choice, String rateChoice, Listener listener) {
+    MicCapture(TalkChannel talk, String choice, String rateChoice, boolean muted, Listener listener) {
         this.talk = talk;
+        this.muted = muted;
         this.choice = choice;
         this.rates = rates(rateChoice);
         this.listener = listener;
         thread = new Thread(this::run, "reolink-mic");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    /** Push to talk: true drops the microphone's audio instead of sending it, false sends it again. */
+    void setMuted(boolean muted) {
+        this.muted = muted;
     }
 
     void release() {
@@ -124,7 +131,7 @@ final class MicCapture {
                     }
                     n = downsampler.process(upChunk, read * up, out, 0);
                 }
-                if (n > 0) talk.write(out, n);
+                if (n > 0 && !muted) talk.write(out, n);
             }
         } catch (RuntimeException error) {
             if (running) listener.onMicState("microphone: " + error);

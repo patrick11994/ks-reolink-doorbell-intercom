@@ -92,6 +92,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Video and audio | **Call volume** | How loud the doorbell plays on the panel. The slider on the call screen changes it too. | 70 |
 | Video and audio | **Microphone** | Automatic, or a fixed Android microphone source: Camcorder, Voice communication, Microphone, Voice recognition or Unprocessed | Automatic |
 | Video and audio | **Talk over** | *Automatic* (Baichuan, and ONVIF if the doorbell refuses it), *Baichuan* (about 1 s to the door, 16 kHz) or *ONVIF* (about 2 s, 8 kHz) | Automatic |
+| Video and audio | **Talk mode** | *Hands free* keeps the microphone open during a call. *Push to talk* sends your voice only while you hold the microphone button, and turns the door's sound down meanwhile, so the door cannot hear itself. | Hands free |
 | Video and audio | **Microphone sample rate** | Automatic (16000 Hz, then 48000 Hz, then 8000 Hz), or one fixed rate | Automatic |
 | Video and audio | **Android call mode** | Switches Android to call mode on the loudspeaker during a call, which most devices need for echo cancelling | on |
 | Video and audio | **Language** | Automatic (the panel's Android language), English or Nederlands | Automatic |
@@ -125,7 +126,7 @@ The card's colour follows the state the way Home Assistant does: a light that is
 
 - **Talking has a delay of about 1 second.** The plugin talks the way the Reolink app does, over Reolink's own protocol, in 16 kHz audio: measured at the door, your voice arrives 1.05 s after the panel sends it. Over the ONVIF backchannel (the **Talk over** setting, or the fallback) the doorbell itself holds about 2.1 s of audio before it plays it, and the sound is 8 kHz telephone quality. A *Microphone active* label reminds you while the microphone is on.
 - **The doorbell's speaker stays free until you talk.** Over Baichuan, the plugin opens talk only while the microphone is on, so the doorbell plays its own ring tone in full, and a Quick Reply from Home Assistant or a card works while the panel rings. Over ONVIF, talk opens at the ring, because the doorbell drops audio until its 2-second buffer has filled.
-- **Echo.** The doorbell's sound plays as call audio, in Android's call mode on the loudspeaker, and Android's echo canceller is attached to the microphone where the device has one. That keeps the panel's own speaker out of the microphone on most devices. Echo cancelling usually works best with **Microphone** set to *Voice communication*. If a visitor hears themselves, try that, turn the panel's speaker down, or turn off **Speaker** while you talk.
+- **Echo.** The doorbell's sound plays as call audio, in Android's call mode on the loudspeaker, and Android's echo canceller is attached to the microphone where the device has one. That keeps the panel's own speaker out of the microphone on most devices. Echo cancelling usually works best with **Microphone** set to *Voice communication*. If a visitor hears themselves, try that, turn the **Call volume** down, or set **Talk mode** to *Push to talk*. On an Echo Show, the Show's own echo cancelling is made for its wake word, and push to talk works best.
 - **The wake word** pauses during a call. While the doorbell's sound plays or the microphone is on, the plugin mutes Kiosk Satellite's wake word, so the door cannot trigger the assistant, and then unmutes it afterwards. A wake word you muted yourself stays muted.
 - **Cards follow their entities only while the call screen is open**, through Kiosk Satellite's own Home Assistant connection, so the plugin never sees your Home Assistant address or token. When a card runs a Home Assistant service, Kiosk Satellite shows its own confirmation toast, as it does for gestures; the *Gesture actions* entry under Device > User Interface > Show system toast notifications turns those off, for gestures too.
 - **Which microphone.** Panels differ in which Android microphone source really works; on an RK3576 panel only *Camcorder* does. **Automatic** uses the first source that opens, Camcorder first, and keeps it for the whole call. If the door does not hear you, pick another one under **Microphone**. If the door hears loud noise instead of you, try another **Microphone sample rate**: on an Echo Show, 48000 Hz gives noise and 16000 Hz is clean.
@@ -153,12 +154,13 @@ The card's colour follows the state the way Home Assistant does: a light that is
 | The door does not hear you | Try another source under **Microphone**, and check that Kiosk Satellite has the microphone permission |
 | The door hears noise instead of your voice | Try another **Microphone sample rate**. The Logs show which source and rate a call used (*microphone: live, …*). |
 | The door hears itself (echo or a feedback loop) | Set **Microphone** to *Voice communication*, and keep **Android call mode** on |
+| The door hears itself even with *Voice communication* | Lower the **Call volume**, or set **Talk mode** to *Push to talk* |
 | Sound or the microphone stops working in a call | Turn off **Android call mode** |
 | The chime is too quiet | Raise **Chime volume**. If it is still quiet, set **Chime sound** to *Media*, the volume most tablets show, or to *Alarm*. |
 | The picture stays black, but sound works | Try **Video** set to *Sub*. If it stays black, the Logs' *video decoder:* lines name the decoder, what the stream declares and where decoding failed: please add them to an issue. |
 | A card shows *Unavailable* | Check Kiosk Satellite's Home Assistant connection, and that the entity still exists |
 | A card does nothing | Check its **Action**. The Logs say what happened (*card: … failed: …*). |
-| You hear nothing with Speaker on | Raise the slider on the call screen. It sets Android's call volume, which is separate from the media volume. |
+| You hear nothing with Speaker on | Raise the slider on the call screen. It sets Android's call volume, which is separate from the media volume. Where Android does not let that change (the Logs then say *played by the plugin*), the plugin sets the level itself. |
 
 ## Building
 

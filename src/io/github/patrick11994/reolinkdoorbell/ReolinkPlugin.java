@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import me.jxl.kiosk.plugins.KioskPlugin;
 import me.jxl.kiosk.plugins.KsTheme;
@@ -62,6 +63,12 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private CallVolume callVolume;
     private CallMode callMode;
     private long ringAt;
+    // Push to talk: the call's ducking, and when the door comes back up after the button lets go (guarded by this).
+    private boolean talking;
+    private ScheduledFuture<?> unduck;
+    /** How long the door stays down after push to talk lets go: our own voice comes back from the door's microphone
+     * about 1.4 s after we spoke (1 s to the door, 0.4 s back), and should not play at full volume. */
+    private static final long DUCK_TAIL_MILLIS = 1500;
     private volatile long countdownStart, countdownMillis;  // shown by the viewer, also one created later
     // The cards' Home Assistant entities: followed only while the viewer is open.
     private final Set<String> followed = new HashSet<>();  // guarded by itself
@@ -254,9 +261,11 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                     @Override public void surfaceGone() { detachVideo(this); }
                     @Override public void volumeChanged(int percent, boolean done) { setCallVolume(percent, done); }
                     @Override public void cardPressed(Cards.Card card) { runCard(card); }
+                    @Override public void holdToTalk(boolean pressed) { ReolinkPlugin.this.holdToTalk(pressed); }
                 });
                 for (Map.Entry<String, Map<?, ?>> known : snapshots.entrySet()) created.entityChanged(known.getKey(), known.getValue());
                 created.setCards(settings.cards);
+                created.setPushToTalk(settings.pushToTalk);
                 if (c != null) created.update(c.state(), c.speakerOn(), c.micOn());
                 created.setCountdown(countdownStart, countdownMillis);
                 view = created;
@@ -367,7 +376,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 showMessage(message);
                 log(message);
             });
-            if (callVolume != null) callVolume.apply(settings.callVolume);
+            applyCallVolume(settings.callVolume, true);
+            if (talking) audioRenderer.setDuck(Loudness.DUCK);
             stream.attachAudio(audioRenderer);
         } else if (!speakerOn && audioRenderer != null) {
             if (stream != null) stream.attachAudio(null);
@@ -379,7 +389,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 talk = openTalk(settings);
                 talk.start();
             }
-            mic = new MicCapture(talk, settings.microphone, settings.micRate, state -> {
+            if (settings.pushToTalk) log("microphone: push to talk");
+            mic = new MicCapture(talk, settings.microphone, settings.micRate, settings.pushToTalk && !talking, state -> {
                 log("microphone: " + state);
                 if (!state.startsWith("live")) showMessage(texts.noMicrophone());
             });
@@ -556,6 +567,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
      * Android refuses network traffic (the RTSP TEARDOWN) and where waiting for a decoder to stop would stall the UI.
      */
     private synchronized void stopMedia() {
+        talking = false;
+        if (unduck != null) unduck.cancel(false);
+        unduck = null;
         if (stream == null && videoRenderer == null && audioRenderer == null && talk == null && mic == null) {
             if (callVolume != null) callVolume.restore();
             if (callMode != null) callMode.leave();
@@ -599,8 +613,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     }
 
     private void setCallVolume(int percent, boolean done) {
-        CallVolume volume = callVolume;
-        if (volume != null) volume.apply(percent);
+        applyCallVolume(percent, done);
         if (!done) return;
         PluginHost h = host;
         if (h == null) return;
@@ -609,6 +622,39 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         } catch (RuntimeException | LinkageError older) {
             // Older Kiosk Satellite: the level holds for this call only.
         }
+    }
+
+    /**
+     * Android's call volume where it can be changed; where it cannot (a fixed-volume device, such as the Echo Show
+     * image, or one that keeps its own level), the door's own playback is turned down instead.
+     */
+    private synchronized void applyCallVolume(int percent, boolean report) {
+        CallVolume volume = callVolume;
+        String refused = volume == null ? "unavailable" : volume.apply(percent);
+        if (audioRenderer != null) audioRenderer.setGain(refused == null ? 1f : Loudness.gain(percent));
+        if (report) {
+            log(refused == null ? "audio: call volume " + percent + "%"
+                : "audio: call volume " + percent + "%, played by the plugin: Android's call volume " + refused);
+        }
+    }
+
+    /** Push to talk: the door hears you only while the button is held, and you hear the door turned down meanwhile. */
+    private synchronized void holdToTalk(boolean pressed) {
+        talking = pressed;
+        if (mic != null) mic.setMuted(!pressed);
+        if (unduck != null) unduck.cancel(false);
+        unduck = null;
+        if (pressed) {
+            if (audioRenderer != null) audioRenderer.setDuck(Loudness.DUCK);
+            return;
+        }
+        ScheduledExecutorService t = ticker;
+        if (t == null) return;
+        unduck = t.schedule(() -> {
+            synchronized (ReolinkPlugin.this) {
+                if (!talking && audioRenderer != null) audioRenderer.setDuck(1f);
+            }
+        }, DUCK_TAIL_MILLIS, TimeUnit.MILLISECONDS);
     }
 
     private void showMessage(String message) {
@@ -664,7 +710,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     static final class Settings {
         final String host, username, password, streamPath, language, microphone, micRate, musicPause, chimeStream, talkPath, videoPath;
         private final String name;
-        final boolean chime, wakeScreen, wakeWordRestore, callMode;
+        final boolean chime, wakeScreen, wakeWordRestore, callMode, pushToTalk;
         final long autoCloseMillis, maxCallMillis;
         final int callVolume, chimeVolume;
         final List<Cards.Card> cards;
@@ -683,6 +729,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             videoPath = video.startsWith("Baichuan") ? "Baichuan" : video.startsWith("RTSP") ? "RTSP" : "Automatic";
             String path = string(values, "talk");
             talkPath = path.startsWith("Baichuan") ? "Baichuan" : path.startsWith("ONVIF") ? "ONVIF" : "Automatic";
+            pushToTalk = string(values, "talkMode").equals("Push to talk");
             chime = !Boolean.FALSE.equals(values.get("chime"));
             Object chimeLevel = values.get("chimeVolume");
             chimeVolume = chimeLevel instanceof Number ? Math.max(0, Math.min(100, ((Number) chimeLevel).intValue())) : 40;
