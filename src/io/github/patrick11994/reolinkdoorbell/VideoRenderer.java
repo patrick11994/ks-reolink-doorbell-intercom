@@ -89,6 +89,33 @@ final class VideoRenderer implements MediaStream.VideoSink {
         if (dropped++ % 10 == 0) listener.onVideoLog("video decoder: behind, " + frames + " frames " + why + ", dropped up to the next keyframe (" + dropped + " times this call)");
     }
 
+    /** Median, 90th percentile and maximum of whole milliseconds, in 5 ms steps up to 2 s, for the log. */
+    private static final class Spread {
+        private final int[] counts = new int[401];
+        private int total;
+
+        void add(long millis) {
+            counts[(int) Math.max(0, Math.min(400, millis / 5))]++;
+            total++;
+        }
+
+        private long at(double share) {
+            int seen = 0;
+            for (int i = 0; i < counts.length; i++) {
+                seen += counts[i];
+                if (seen > share * total) return i * 5L;
+            }
+            return 2000;
+        }
+
+        @Override public String toString() {
+            if (total == 0) return "-";
+            int highest = counts.length - 1;
+            while (counts[highest] == 0) highest--;
+            return at(0.5) + "/" + at(0.9) + "/" + highest * 5;
+        }
+    }
+
     void release() {
         running = false;
         thread.interrupt();
@@ -103,6 +130,8 @@ final class VideoRenderer implements MediaStream.VideoSink {
         MediaCodec codec = null;
         long[] queuedAt = new long[256];
         long[] queuedMicros = new long[256];
+        boolean[] queuedKey = new boolean[256];
+        Spread keyDecode = new Spread(), frameDecode = new Spread(), behind = new Spread();  // for the log
         double decodeAverage = 0;
         boolean shown = false;
         VideoPacer pacer = new VideoPacer();
@@ -165,6 +194,7 @@ final class VideoRenderer implements MediaStream.VideoSink {
                             codec.queueInputBuffer(input, 0, pending.data.length, pending.micros, 0);
                             queuedAt[slot % 256] = System.nanoTime();
                             queuedMicros[slot % 256] = pending.micros;
+                            queuedKey[slot % 256] = pending.keyframe;
                             slot++;
                         } else {
                             if (!warnedTooLarge) {
@@ -192,6 +222,13 @@ final class VideoRenderer implements MediaStream.VideoSink {
                     }
                     if (output < 0) break;
                     long at = pacer.displayAt(info.presentationTimeUs, now / 1000) * 1000;
+                    behind.add(pacer.behindMillis());
+                    for (int i = slot - 1; i >= Math.max(0, slot - 256); i--) {
+                        if (queuedMicros[i % 256] == info.presentationTimeUs) {
+                            (queuedKey[i % 256] ? keyDecode : frameDecode).add((now - queuedAt[i % 256]) / 1_000_000);
+                            break;
+                        }
+                    }
                     if (late >= 0) {
                         boolean newerLate = at <= now;
                         codec.releaseOutputBuffer(late, !newerLate);
@@ -239,6 +276,8 @@ final class VideoRenderer implements MediaStream.VideoSink {
                     + (superseded > 0 ? " (" + superseded + " of them skipped for a newer one)" : "") + ", longest wait between frames " + largestGap
                     + " ms, cushion " + pacer.cushionMillis() + " ms, decoder " + Math.round(decodeAverage) + " ms on average"
                     + (dropped > 0 ? ", backlog dropped " + dropped + " times" : ""));
+                listener.onVideoLog("video: decoder time for keyframes " + keyDecode + ", other frames " + frameDecode
+                    + "; ready later than the earliest by " + behind + " (median, 90%, max in ms)");
             }
             if (codec != null) {
                 try { codec.stop(); } catch (RuntimeException ignored) {}
