@@ -9,11 +9,16 @@ on:
   workflow_dispatch:
 permissions:
   contents: write
+# Actions are pinned by commit, with the version beside it: a moved tag cannot change what builds the shipped DEX
+# (setup-android supplies d8 and android.jar) or the checksum made next to it. Update a pin by hand:
+# gh api repos/<owner>/<action>/commits/<tag> --jq .sha
 jobs:
   build:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false  # the steps that need the token get it from GH_TOKEN
       - name: Validate release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -32,12 +37,12 @@ jobs:
             echo "::error::The release for $GITHUB_REF_NAME is already published, and immutable releases cannot take files."
             exit 1
           fi
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad  # v6.1.0
         with:
           distribution: temurin
           java-version: '21'
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd  # v4.0.4
       - name: Install Android build tools
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Test
