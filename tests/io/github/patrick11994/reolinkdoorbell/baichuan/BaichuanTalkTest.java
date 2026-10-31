@@ -39,9 +39,9 @@ public final class BaichuanTalkTest {
             talk.start();
             short[] tone = new short[16000];
             for (int i = 0; i < tone.length; i++) tone[i] = (short) (8000 * Math.sin(2 * Math.PI * 1000 * i / 16000));
-            Thread.sleep(150);
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> states.contains("open"), 5000, "talk open");
             talk.write(tone, 3200);  // 200 ms, the most the queue keeps
-            Thread.sleep(600);
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> bodies.size() >= 8, 5000, "eight blocks");
             talk.stop();
             doorbell.join(3000);
             check(states.contains("open"), true);
@@ -77,7 +77,7 @@ public final class BaichuanTalkTest {
             doorbell.start();
             BaichuanTalk talk = new BaichuanTalk("127.0.0.1", server.getLocalPort(), BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, states::add, 2000);
             talk.start();
-            Thread.sleep(400);
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> log.stream().filter(l -> l.startsWith("talk config")).count() >= 2, 5000, "TalkConfig again after the reset");
             talk.stop();
             doorbell.join(3000);
             check(states.contains("open"), true);
@@ -98,7 +98,7 @@ public final class BaichuanTalkTest {
             doorbell.start();
             BaichuanTalk talk = new BaichuanTalk("127.0.0.1", server.getLocalPort(), BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, states::add, 2000);
             talk.start();
-            Thread.sleep(400);
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> states.stream().anyMatch(st -> st.startsWith("talk refused")), 5000, "the refusal");
             talk.stop();
             doorbell.join(3000);
             check(states.stream().anyMatch(s -> s.startsWith("talk refused")), true);
