@@ -31,6 +31,7 @@ public final class Backchannel implements TalkChannel {
     private final Listener listener;
     private final TalkQueue queue = new TalkQueue(START_SAMPLES, MAX_SAMPLES);
     private volatile boolean running;
+    private boolean stopped;  // guarded by this
     private volatile long packetsSent, rtcpReceived;
     private RtspSession session;
     private Thread thread;
@@ -45,7 +46,7 @@ public final class Backchannel implements TalkChannel {
     }
 
     @Override public synchronized void start() {
-        if (running) return;
+        if (running || stopped) return;  // one stream per object: a late start after stop() must not open it again
         running = true;
         thread = new Thread(this::run, "reolink-talk");
         thread.setDaemon(true);
@@ -56,6 +57,7 @@ public final class Backchannel implements TalkChannel {
         Thread t;
         synchronized (this) {
             running = false;
+            stopped = true;
             t = thread;
             thread = null;
         }

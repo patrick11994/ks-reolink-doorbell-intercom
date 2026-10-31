@@ -26,6 +26,7 @@ public final class BaichuanStream implements MediaStream {
     private final int timeoutMillis;
     private final FrameHub hub = new FrameHub();
     private volatile boolean running;
+    private boolean stopped;  // guarded by this
     private BaichuanClient.Login session;
     private Thread thread;
     private long videoBase = -1;
@@ -47,7 +48,7 @@ public final class BaichuanStream implements MediaStream {
     }
 
     @Override public synchronized void start() {
-        if (running) return;
+        if (running || stopped) return;  // one stream per object: a late start after stop() must not open it again
         running = true;
         hub.start();
         thread = new Thread(this::run, "reolink-stream");
@@ -60,6 +61,7 @@ public final class BaichuanStream implements MediaStream {
         BaichuanClient.Login s;
         synchronized (this) {
             running = false;
+            stopped = true;
             t = thread;
             thread = null;
             s = session;

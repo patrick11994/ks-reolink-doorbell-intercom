@@ -11,9 +11,15 @@ public final class FallbackStreamTest {
         long firstKeyframe = -1;
         VideoSink video;
         AudioSink audio;
+        Runnable whileStopping;  // what another thread does while stop() waits for this stream's thread
 
         @Override public void start() { log.add("start"); }
-        @Override public void stop() { log.add("stop"); }
+        @Override public void stop() {
+            log.add("stop");
+            Runnable meanwhile = whileStopping;
+            whileStopping = null;
+            if (meanwhile != null) meanwhile.run();
+        }
         @Override public void attachVideo(VideoSink sink) { video = sink; log.add(sink == null ? "video off" : "video on"); }
         @Override public void attachAudio(AudioSink sink) { audio = sink; log.add(sink == null ? "audio off" : "audio on"); }
         @Override public long firstKeyframeMillis() { return firstKeyframe; }
@@ -60,6 +66,26 @@ public final class FallbackStreamTest {
         stopped.stop();
         check(stopped.primaryFailed(), false);
         check(late[0], 0);
+
+        // The call ends while the switch waits for the primary to stop: the fallback never starts.
+        FakeStream slow = new FakeStream(), unwanted = new FakeStream();
+        FallbackStream ending = new FallbackStream(slow, () -> unwanted);
+        ending.start();
+        slow.whileStopping = ending::stop;
+        ending.primaryFailed();
+        check(unwanted.log.contains("start"), false);
+        check(unwanted.log.contains("stop"), true);
+
+        // A new viewer attaches while the switch waits: the fallback gets the new viewer's sink, not the old one.
+        FakeStream slower = new FakeStream(), next = new FakeStream();
+        FallbackStream rebuilt = new FallbackStream(slower, () -> next);
+        rebuilt.start();
+        MediaStream.VideoSink oldView = (au, micros, key) -> {}, newView = (au, micros, key) -> {};
+        rebuilt.attachVideo(oldView);
+        slower.whileStopping = () -> rebuilt.attachVideo(newView);
+        rebuilt.primaryFailed();
+        check(next.video == newView, true);
+        check(next.log.get(next.log.size() - 1), "start");
 
         System.out.println("FallbackStreamTest passed");
     }

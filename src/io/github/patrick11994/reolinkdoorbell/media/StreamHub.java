@@ -15,6 +15,7 @@ public final class StreamHub implements MediaStream {
     private RtspSession session;
     private Thread starter;
     private volatile boolean running;
+    private boolean stopped;  // guarded by this
     private long videoBase = -1, audioBase = -1;
     private int videoClock = 90000;
 
@@ -28,7 +29,7 @@ public final class StreamHub implements MediaStream {
     }
 
     @Override public synchronized void start() {
-        if (running) return;
+        if (running || stopped) return;  // one stream per object: a late start after stop() must not open it again
         running = true;
         hub.start();
         Thread thread = new Thread(this::connect, "reolink-stream-start");
@@ -42,6 +43,7 @@ public final class StreamHub implements MediaStream {
         Thread t;
         synchronized (this) {
             running = false;
+            stopped = true;
             s = session;
             session = null;
             t = starter;
