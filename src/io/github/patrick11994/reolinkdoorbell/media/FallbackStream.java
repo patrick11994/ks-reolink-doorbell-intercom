@@ -33,18 +33,19 @@ public final class FallbackStream implements MediaStream {
      */
     public boolean primaryFailed() {
         MediaStream f;
-        VideoSink v;
-        AudioSink a;
         synchronized (this) {
             if (stopped || fallback != null || primary.firstKeyframeMillis() >= 0) return false;
             fallback = f = fallbackFactory.create();
-            v = video;
-            a = audio;
         }
-        primary.stop();
-        if (v != null) f.attachVideo(v);
-        if (a != null) f.attachAudio(a);
-        f.start();
+        primary.stop();  // waits for the primary's thread: not under the lock
+        // Meanwhile the call may have ended, or a new viewer attached its sinks: take what is current now. Attaching
+        // under the lock keeps a sink attached meanwhile from being overwritten by an older one.
+        synchronized (this) {
+            if (stopped) return true;  // stop() stopped the fallback too, and a stopped stream does not start again
+            if (video != null) f.attachVideo(video);
+            if (audio != null) f.attachAudio(audio);
+            f.start();
+        }
         return true;
     }
 
@@ -62,22 +63,14 @@ public final class FallbackStream implements MediaStream {
         if (f != null) f.stop();
     }
 
-    @Override public void attachVideo(VideoSink sink) {
-        MediaStream current;
-        synchronized (this) {
-            video = sink;
-            current = fallback != null ? fallback : primary;
-        }
-        current.attachVideo(sink);
+    @Override public synchronized void attachVideo(VideoSink sink) {
+        video = sink;
+        (fallback != null ? fallback : primary).attachVideo(sink);
     }
 
-    @Override public void attachAudio(AudioSink sink) {
-        MediaStream current;
-        synchronized (this) {
-            audio = sink;
-            current = fallback != null ? fallback : primary;
-        }
-        current.attachAudio(sink);
+    @Override public synchronized void attachAudio(AudioSink sink) {
+        audio = sink;
+        (fallback != null ? fallback : primary).attachAudio(sink);
     }
 
     @Override public long firstKeyframeMillis() {
