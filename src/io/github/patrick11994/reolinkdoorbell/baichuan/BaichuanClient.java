@@ -51,6 +51,7 @@ public final class BaichuanClient {
     private int counter;
     private byte[] aesKey;
     private long connectedSince;
+    private volatile long checkAsked;  // when checkNow() asked, on the session's clock; 0 never
     long firstRetry = 2_000;  // set before start(); tests shorten it
 
     public BaichuanClient(String host, int port, String username, String password, Listener listener) {
@@ -73,6 +74,14 @@ public final class BaichuanClient {
         thread = new Thread(this::run, "reolink-baichuan");
         thread.setDaemon(true);
         thread.start();
+    }
+
+    /**
+     * Something else suggests the doorbell is gone (a call's stream just dropped): ask it for a sign of life now, and
+     * end the session if none comes within the timeout, instead of waiting out three keepalive intervals.
+     */
+    public void checkNow() {
+        checkAsked = System.nanoTime() / 1_000_000;
     }
 
     /** Stops and waits up to a second for the thread, so a plugin stop leaves nothing running. */
@@ -152,7 +161,9 @@ public final class BaichuanClient {
                 in.reset();
             } catch (SocketTimeoutException quiet) {
                 long now = System.nanoTime() / 1_000_000;
-                if (now - Math.max(lastReceived, lastSent) > keepaliveMillis) {
+                long asked = checkAsked;
+                boolean checking = asked > lastReceived;  // a check that nothing has answered yet
+                if (now - Math.max(lastReceived, lastSent) > keepaliveMillis || (checking && lastSent < asked)) {
                     // reolink_aio: LinkType (93) keeps a live subscription open; re-subscribing revives a silent one.
                     // The doorbell answers both, so allow one interval for the answer before sending again.
                     int id = nextId(pushesSeen ? CHANNEL_HOST : CHANNEL_PUSH);
@@ -160,7 +171,7 @@ public final class BaichuanClient {
                     out.flush();
                     lastSent = now;
                 }
-                if (now - lastReceived > 3 * keepaliveMillis) throw new IOException("the doorbell stopped answering");
+                if (now - lastReceived > 3 * keepaliveMillis || (checking && now - asked > timeoutMillis)) throw new IOException("the doorbell stopped answering");
                 continue;
             }
             BcMessage message;
