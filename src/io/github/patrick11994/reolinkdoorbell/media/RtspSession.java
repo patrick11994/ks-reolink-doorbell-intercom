@@ -137,6 +137,16 @@ public final class RtspSession {
         }
     }
 
+    /** Closes the connection at once, without TEARDOWN: for a writer stuck on a connection that is gone. */
+    public void abort() {
+        closed = true;
+        try {
+            if (socket != null) socket.close();
+        } catch (IOException ignored) {
+            // Closing is best effort.
+        }
+    }
+
     /** TEARDOWN as a courtesy, then closes the connection and waits briefly for the reader. */
     public void close() {
         closed = true;

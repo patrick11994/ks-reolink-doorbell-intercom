@@ -55,16 +55,21 @@ public final class Backchannel implements TalkChannel {
 
     @Override public void stop() {
         Thread t;
+        RtspSession s;
         synchronized (this) {
             running = false;
             stopped = true;
             t = thread;
             thread = null;
+            s = session;
         }
         if (t != null) {
             t.interrupt();
             try {
-                t.join(1500);
+                t.join(300);
+                // A write stuck on a dead connection does not end on an interrupt; closing the socket ends it.
+                if (t.isAlive() && s != null) s.abort();
+                t.join(1200);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
