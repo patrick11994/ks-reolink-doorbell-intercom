@@ -405,7 +405,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }
         if (speakerOn && audioRenderer == null && stream != null) {
             audioRenderer = new AudioRenderer(message -> {
-                showNotice(message);
+                showNotice(texts.doorSoundStopped());
                 log(message);
             });
             applyCallVolume(liveCallVolume, true);
@@ -506,7 +506,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                     if (f.primaryFailed()) log("video: falling back to RTSP");
                 });
             } else if (state.startsWith("stream failed") || state.startsWith("stream ended")) {
-                showMessage(texts.noVideo(state.substring(state.indexOf(' ') + 1)));
+                showMessage(videoProblem(state));
             }
         });
         if (s.videoPath.equals("Baichuan")) return baichuan;
@@ -517,8 +517,13 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private MediaStream rtspStream(Settings s) {
         return new StreamHub(s.host, 554, s.streamPath, s.username, s.password, state -> {
             if (!state.equals("connecting") && !state.equals("streaming")) log("video: " + state);
-            if (state.startsWith("stream failed") || state.startsWith("stream ended")) showMessage(texts.noVideo(state.substring(state.indexOf(' ') + 1)));
+            if (state.startsWith("stream failed") || state.startsWith("stream ended")) showMessage(videoProblem(state));
         });
+    }
+
+    /** What the viewer says about a stream state; the protocol's own words only go to the log. */
+    private String videoProblem(String state) {
+        return state.startsWith("stream ended") ? texts.videoStopped() : texts.noVideo();
     }
 
     /**
@@ -538,7 +543,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 fallback[0].primaryRefused();
             } else if (state.startsWith("talk refused") || state.startsWith("talk failed")) {
                 voiceGoesOut(false);
-                showNotice(state);
+                showNotice(texts.voiceNotThrough());
             }
         });
         baichuanTalk = baichuan;
@@ -554,7 +559,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             if (state.equals("open")) voiceGoesOut(true);
             if (state.startsWith("talk failed")) {
                 voiceGoesOut(false);
-                showNotice(state);
+                showNotice(texts.voiceNotThrough());
             }
         });
     }
@@ -581,9 +586,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             }
 
             @Override public void onVideoError(String message) {
-                String shown = message == null ? texts.noPictureYet() : message;
-                showMessage(shown);
-                log(shown);
+                // null: no keyframe yet. Otherwise the decoder failed, which the log explains.
+                showMessage(message == null ? texts.noPictureYet() : texts.videoNotShown());
+                log(message == null ? texts.noPictureYet() : message);
             }
 
             @Override public void onVideoLog(String message) {
