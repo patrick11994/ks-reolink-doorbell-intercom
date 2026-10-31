@@ -64,6 +64,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private int decoderRestarts;  // in this call
     private int talkGeneration;  // the same for talk: each channel opened, and each one dropped on purpose
     private int talkRetries;  // in a row, since talk last opened
+    private int talkLostFor = -1;  // the talk channel already being reopened: a second error from it changes nothing
     private static final int MAX_DECODER_RESTARTS = 2;
     private AudioRenderer audioRenderer;
     private TalkChannel talk;
@@ -652,6 +653,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
      * call): say so, and open it again the same way as the stream, with the microphone moved over to the new channel.
      */
     private synchronized void talkLost(int generation) {
+        if (generation == talkLostFor) return;
+        talkLostFor = generation;
         voiceGoesOut(false);
         showNotice(texts.voiceNotThrough());
         if (generation != talkGeneration || stopped || !viewerOpen || talk == null || (mic == null && !talkFromRing)) return;
