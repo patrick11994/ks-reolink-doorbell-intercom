@@ -62,6 +62,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private int streamGeneration;
     private int reconnects;  // in a row, since a stream last delivered
     private int decoderRestarts;  // in this call
+    private int talkGeneration;  // the same for talk: each channel opened, and each one dropped on purpose
+    private int talkRetries;  // in a row, since talk last opened
     private static final int MAX_DECODER_RESTARTS = 2;
     private AudioRenderer audioRenderer;
     private TalkChannel talk;
@@ -436,12 +438,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 talk.start();
             }
             if (callPushToTalk) log("microphone: push to talk");
-            mic = new MicCapture(talk, settings.microphone, settings.micRate, callPushToTalk && !talking, state -> {
-                log("microphone: " + state);
-                boolean live = state.startsWith("live");
-                voiceGoesOut(live);
-                if (!live) showNotice(texts.noMicrophone());
-            });
+            mic = openMic();
         } else if (!micOn && mic != null) {
             releaseLater(mic::release);
             mic = null;
@@ -453,8 +450,19 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 releaseLater(talk::stop);
                 talk = null;
                 baichuanTalk = null;
+                talkGeneration++;  // dropped on purpose: nothing to reopen
             }
         }
+    }
+
+    /** The microphone, into the current talk channel; muted in push to talk until the button is held. */
+    private MicCapture openMic() {
+        return new MicCapture(talk, settings.microphone, settings.micRate, callPushToTalk && !talking, state -> {
+            log("microphone: " + state);
+            boolean live = state.startsWith("live");
+            voiceGoesOut(live);
+            if (!live) showNotice(texts.noMicrophone());
+        });
     }
 
     /** The settings page's Check button: runs off the plugin worker and reports through the setup run. */
@@ -585,36 +593,71 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
      */
     private TalkChannel openTalk(Settings s) {
         baichuanTalk = null;
-        if (s.talkPath.equals("ONVIF")) return onvifTalk(s);
+        final int generation = ++talkGeneration;
+        if (s.talkPath.equals("ONVIF")) return onvifTalk(s, generation);
         final FallbackTalk[] fallback = new FallbackTalk[1];
         BaichuanTalk baichuan = new BaichuanTalk(s.host, 9000, s.username, s.password, state -> {
             if (!state.equals("connecting") && !state.equals("open")) log("talk: " + state);
             else if (state.equals("open")) log("talk: open over Baichuan");
-            if (state.equals("open")) voiceGoesOut(true);
+            if (state.equals("open")) talkOpened(generation);
             if (state.startsWith("talk refused") && fallback[0] != null) {
                 log("talk: falling back to the ONVIF backchannel");
                 fallback[0].primaryRefused();
-            } else if (state.startsWith("talk refused") || state.startsWith("talk failed")) {
-                voiceGoesOut(false);
+            } else if (state.startsWith("talk refused")) {
+                voiceGoesOut(false);  // the doorbell will refuse again: not retried
                 showNotice(texts.voiceNotThrough());
+            } else if (state.startsWith("talk failed") || state.startsWith("talk ended")) {
+                talkLost(generation);
             }
         });
         baichuanTalk = baichuan;
         if (s.talkPath.equals("Baichuan")) return baichuan;
-        fallback[0] = new FallbackTalk(baichuan, () -> onvifTalk(s));
+        fallback[0] = new FallbackTalk(baichuan, () -> onvifTalk(s, generation));
         return fallback[0];
     }
 
-    private TalkChannel onvifTalk(Settings s) {
+    private TalkChannel onvifTalk(Settings s, int generation) {
         return new Backchannel(s.host, 554, s.streamPath, s.username, s.password, state -> {
             if (!state.equals("connecting") && !state.equals("open")) log("talk: " + state);
             else if (state.equals("open")) log("talk: open over ONVIF");
-            if (state.equals("open")) voiceGoesOut(true);
-            if (state.startsWith("talk failed")) {
-                voiceGoesOut(false);
-                showNotice(texts.voiceNotThrough());
-            }
+            if (state.equals("open")) talkOpened(generation);
+            if (state.startsWith("talk failed") || state.startsWith("talk ended")) talkLost(generation);
         });
+    }
+
+    private synchronized void talkOpened(int generation) {
+        if (generation == talkGeneration) talkRetries = 0;
+        voiceGoesOut(true);
+    }
+
+    /**
+     * Talk failed or dropped while it is still wanted (the microphone is on, or ONVIF talk that stays open for the
+     * call): say so, and open it again the same way as the stream, with the microphone moved over to the new channel.
+     */
+    private synchronized void talkLost(int generation) {
+        voiceGoesOut(false);
+        showNotice(texts.voiceNotThrough());
+        if (generation != talkGeneration || stopped || !viewerOpen || talk == null || (mic == null && !talkFromRing)) return;
+        ScheduledExecutorService t = ticker;
+        if (t == null) return;
+        long delay = Math.min(5_000, 1_000L << Math.min(talkRetries, 3));
+        talkRetries++;
+        log("talk: reopening in " + delay / 1000 + " s");
+        t.schedule(() -> reopenTalk(generation), delay, TimeUnit.MILLISECONDS);
+    }
+
+    private synchronized void reopenTalk(int generation) {
+        if (generation != talkGeneration || stopped || !viewerOpen || talk == null || (mic == null && !talkFromRing)) return;
+        final TalkChannel old = talk;
+        logTalk();
+        talk = openTalk(settings);
+        talk.start();
+        releaseLater(old::stop);
+        if (mic != null) {
+            final MicCapture oldMic = mic;
+            releaseLater(oldMic::release);
+            mic = openMic();
+        }
     }
 
     /**
@@ -706,6 +749,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
      */
     private synchronized void stopMedia() {
         streamGeneration++;  // a reconnect still due belongs to this call: it must not reopen anything
+        talkGeneration++;
         talking = false;
         if (unduck != null) unduck.cancel(false);
         unduck = null;
