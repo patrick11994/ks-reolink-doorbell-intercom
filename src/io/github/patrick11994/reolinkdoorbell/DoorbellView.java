@@ -11,8 +11,12 @@ import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.SurfaceTexture;
+import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.text.SpannableString;
+import android.text.style.RelativeSizeSpan;
+import android.text.style.StyleSpan;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -550,7 +554,16 @@ final class DoorbellView extends FrameLayout {
      * a dark veil so a frozen frame does not pass for a visitor standing still.
      */
     void setMessage(String message) {
-        placeholder.setText(message);
+        // Two lines: what you see, read from across the room, then why.
+        int newline = message.indexOf('\n');
+        if (newline > 0) {
+            SpannableString shown = new SpannableString(message);
+            shown.setSpan(new StyleSpan(Typeface.BOLD), 0, newline, 0);
+            shown.setSpan(new RelativeSizeSpan(1.3f), 0, newline, 0);
+            placeholder.setText(shown);
+        } else {
+            placeholder.setText(message);
+        }
         placeholder.setBackgroundColor(pictureShown ? 0xB3000000 : 0);
         placeholder.setVisibility(VISIBLE);
         if (pictureShown) {

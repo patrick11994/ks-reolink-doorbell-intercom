@@ -412,7 +412,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }
         if (speakerOn && audioRenderer == null && stream != null) {
             audioRenderer = new AudioRenderer(message -> {
-                showNotice(texts.doorSoundStopped());
+                showNotice(texts.doorbellSoundStopped());
                 log(message);
             });
             applyCallVolume(liveCallVolume, true);
