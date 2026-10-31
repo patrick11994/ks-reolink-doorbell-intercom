@@ -38,6 +38,7 @@ public final class BaichuanTalk implements TalkChannel {
     private final int timeoutMillis;
     private final TalkQueue queue = new TalkQueue(RATE * 40 / 1000 + 1025, RATE * 200 / 1000 + 1025);
     private volatile boolean running;
+    private final java.util.concurrent.atomic.AtomicBoolean ended = new java.util.concurrent.atomic.AtomicBoolean();
     private volatile long blocksSent;
     private volatile long encodeNanos;
     private volatile int blockSamples = 1025;
@@ -146,7 +147,9 @@ public final class BaichuanTalk implements TalkChannel {
                 listener.onTalkState("talk refused: TalkConfig answered " + answer.statusOrEncryption);
                 return;
             }
-            s.socket.setSoTimeout(0);
+            // The doorbell answers every block, so a quiet connection is a dead one: sending into it does not fail
+            // until the doorbell is back and resets it, which after a power cut took 53 s.
+            s.socket.setSoTimeout(timeoutMillis);
             final BaichuanClient.Login live = s;
             Thread reader = new Thread(() -> drain(live), "reolink-talk-read");
             reader.setDaemon(true);
@@ -156,9 +159,9 @@ public final class BaichuanTalk implements TalkChannel {
         } catch (InterruptedException stopped) {
             // Stopped.
         } catch (BaichuanClient.LoginRefused refused) {
-            if (running) listener.onTalkState("talk failed: " + refused.getMessage());
+            end("talk failed: " + refused.getMessage());
         } catch (Exception error) {
-            if (running) listener.onTalkState("talk failed: " + (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()));
+            end("talk failed: " + (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()));
         } finally {
             if (s != null) {
                 try {
@@ -208,8 +211,24 @@ public final class BaichuanTalk implements TalkChannel {
     private void drain(BaichuanClient.Login s) {
         try {
             while (running) BcMessage.read(s.in);
-        } catch (IOException ended) {
-            if (running) listener.onTalkState("talk ended: " + (ended.getMessage() == null ? "connection closed" : ended.getMessage()));
+        } catch (java.net.SocketTimeoutException quiet) {
+            end("talk ended: the doorbell stopped answering");
+            closeQuietly(s);  // a sender stuck on the dead connection's full buffer gives up too
+        } catch (IOException gone) {
+            end("talk ended: " + (gone.getMessage() == null ? "connection closed" : gone.getMessage()));
+        }
+    }
+
+    /** Reports the session's end once: the reader and the sender both notice a dead connection. */
+    private void end(String state) {
+        if (running && ended.compareAndSet(false, true)) listener.onTalkState(state);
+    }
+
+    private static void closeQuietly(BaichuanClient.Login s) {
+        try {
+            s.close();
+        } catch (IOException ignored) {
+            // Closed anyway.
         }
     }
 
