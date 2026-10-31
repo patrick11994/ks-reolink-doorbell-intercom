@@ -57,6 +57,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private VideoRenderer videoRenderer;
     private Object videoOwner;  // the view whose surface the decoder draws on
     private Surface videoSurface;  // that surface: released after its decoder, never before
+    // Each stream (a call's, or a reconnect's) and each stopMedia count this up, so a reconnect that is due for an
+    // older stream, or for a call that has ended, does nothing.
+    private int streamGeneration;
+    private int reconnects;  // in a row, since a stream last delivered
     private AudioRenderer audioRenderer;
     private TalkChannel talk;
     private BaichuanTalk baichuanTalk;  // the Baichuan part of talk, for its encoder load
@@ -485,7 +489,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         ringAt = System.nanoTime() / 1_000_000;
         log("media: start stream " + s.streamPath + " over " + (s.videoPath.equals("RTSP") ? "RTSP" : "Baichuan") + " (Video over: " + s.videoPath + ")");
         publishText("first_frame", texts.firstPictureReading(), texts.waiting());
-        stream = openStream(s);
+        reconnects = 0;
+        stream = openStream(s, ++streamGeneration);
         stream.start();
         // ONVIF talk opens now and streams silence, so the doorbell's 2 s playout buffer is full by the time anyone
         // presses Answer (it drops audio while that buffer fills). Baichuan talk sets up in about 0.2 s, so it waits
@@ -502,31 +507,67 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
      * The video path from the Video over setting: Baichuan (the Reolink app's way, a fresh keyframe on request), RTSP,
      * or Automatic: Baichuan, and RTSP if Baichuan fails before the first picture.
      */
-    private MediaStream openStream(Settings s) {
-        if (s.videoPath.equals("RTSP")) return rtspStream(s);
+    private MediaStream openStream(Settings s, int generation) {
+        if (s.videoPath.equals("RTSP")) return rtspStream(s, generation);
         final FallbackStream[] fallback = new FallbackStream[1];
         BaichuanStream baichuan = new BaichuanStream(s.host, 9000, s.username, s.password, s.streamPath.endsWith("_sub"), state -> {
             if (!state.equals("connecting") && !state.equals("streaming")) log("video: " + state + " (Baichuan)");
+            if (state.equals("streaming")) streamDelivers(generation);
             FallbackStream f = fallback[0];
-            if (state.startsWith("stream failed") && f != null) {
+            if (state.startsWith("stream failed") && f != null && !f.usingFallback() && !state.contains("H.265")) {
                 // Reported on the Baichuan stream's own thread; switching stops that stream and waits for it.
                 releaseLater(() -> {
                     if (f.primaryFailed()) log("video: falling back to RTSP");
+                    else streamLost(generation);
                 });
             } else if (state.startsWith("stream failed") || state.startsWith("stream ended")) {
                 showMessage(videoProblem(state));
+                if (!state.contains("H.265")) streamLost(generation);  // trying again does not change the codec
             }
         });
         if (s.videoPath.equals("Baichuan")) return baichuan;
-        fallback[0] = new FallbackStream(baichuan, () -> rtspStream(s));
+        fallback[0] = new FallbackStream(baichuan, () -> rtspStream(s, generation));
         return fallback[0];
     }
 
-    private MediaStream rtspStream(Settings s) {
+    private MediaStream rtspStream(Settings s, int generation) {
         return new StreamHub(s.host, 554, s.streamPath, s.username, s.password, state -> {
             if (!state.equals("connecting") && !state.equals("streaming")) log("video: " + state);
-            if (state.startsWith("stream failed") || state.startsWith("stream ended")) showMessage(videoProblem(state));
+            if (state.equals("streaming")) streamDelivers(generation);
+            if (state.startsWith("stream failed") || state.startsWith("stream ended")) {
+                showMessage(videoProblem(state));
+                if (!state.contains("H.265")) streamLost(generation);  // trying again does not change the codec
+            }
         });
+    }
+
+    private synchronized void streamDelivers(int generation) {
+        if (generation == streamGeneration) reconnects = 0;
+    }
+
+    /**
+     * The call's stream ended or failed (the doorbell rebooted, a network hiccup): while the viewer is open, open it
+     * again, sooner the first time, at most every 5 s. The viewer's decoder and sound carry on with the new stream, and
+     * newestIFrame brings a fresh picture about 0.3 s after it connects.
+     */
+    private synchronized void streamLost(int generation) {
+        if (generation != streamGeneration || stopped || !viewerOpen) return;
+        ScheduledExecutorService t = ticker;
+        if (t == null) return;
+        long delay = Math.min(5_000, 1_000L << Math.min(reconnects, 3));
+        reconnects++;
+        log("media: reopening the stream in " + delay / 1000 + " s");
+        t.schedule(() -> reopenStream(generation), delay, TimeUnit.MILLISECONDS);
+    }
+
+    private synchronized void reopenStream(int generation) {
+        if (generation != streamGeneration || stopped || !viewerOpen || stream == null) return;
+        final MediaStream old = stream;
+        stream = openStream(settings, ++streamGeneration);
+        if (videoRenderer != null) stream.attachVideo(videoRenderer);
+        if (audioRenderer != null) stream.attachAudio(audioRenderer);
+        stream.start();
+        releaseLater(old::stop);  // it may still say goodbye to the doorbell: off this thread
     }
 
     /** What the viewer says about a stream state; the protocol's own words only go to the log. */
@@ -633,6 +674,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
      * Android refuses network traffic (the RTSP TEARDOWN) and where waiting for a decoder to stop would stall the UI.
      */
     private synchronized void stopMedia() {
+        streamGeneration++;  // a reconnect still due belongs to this call: it must not reopen anything
         talking = false;
         if (unduck != null) unduck.cancel(false);
         unduck = null;
