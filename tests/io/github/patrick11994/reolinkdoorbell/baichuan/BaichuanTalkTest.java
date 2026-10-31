@@ -24,6 +24,7 @@ public final class BaichuanTalkTest {
         talksLikeTheApp();
         resetsAndRetriesWhenBusy();
         refusedWithoutAdpcm();
+        silentDoorbellEndsTalk();
         System.out.println("BaichuanTalkTest passed");
     }
 
@@ -106,8 +107,38 @@ public final class BaichuanTalkTest {
         }
     }
 
+    /** A doorbell that stops answering the blocks: talk ends within the timeout, reported once, not when it comes back. */
+    static void silentDoorbellEndsTalk() throws Exception {
+        List<String> states = new CopyOnWriteArrayList<>();
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread doorbell = new Thread(() -> fakeTalkDoorbell(server, ABILITY, 0, new CopyOnWriteArrayList<>(), new CopyOnWriteArrayList<>(), false));
+            doorbell.start();
+            BaichuanTalk talk = new BaichuanTalk("127.0.0.1", server.getLocalPort(), BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, states::add, 1000);
+            talk.start();
+            long took;
+            try {
+                io.github.patrick11994.reolinkdoorbell.Await.until(() -> states.contains("open"), 5000, "talk open");
+                long opened = System.nanoTime();
+                io.github.patrick11994.reolinkdoorbell.Await.until(() -> states.stream().anyMatch(s -> s.startsWith("talk ended")), 5000, "talk ended");
+                took = (System.nanoTime() - opened) / 1_000_000;
+                Thread.sleep(300);  // the sender notices the closed connection too: that must not be a second report
+            } finally {
+                talk.stop();  // a failure must not leave talk sending, which keeps the test running
+            }
+            doorbell.join(3000);
+            check(states.stream().filter(s -> s.startsWith("talk ended") || s.startsWith("talk failed")).count(), 1L);
+            check(states.contains("talk ended: the doorbell stopped answering"), true);
+            check(took < 2500, true);  // the 1 s timeout, not the doorbell's return
+        }
+    }
+
     /** A doorbell's talk session: answers TalkAbility, TalkConfig (busyFirst times 422 first), and every block. */
     public static void fakeTalkDoorbell(ServerSocket server, String ability, int busyFirst, List<String> log, List<byte[]> bodies) {
+        fakeTalkDoorbell(server, ability, busyFirst, log, bodies, true);
+    }
+
+    /** answerBlocks false: the doorbell goes quiet once talk is set up, as one that lost power does. */
+    static void fakeTalkDoorbell(ServerSocket server, String ability, int busyFirst, List<String> log, List<byte[]> bodies, boolean answerBlocks) {
         try (Socket socket = server.accept()) {
             socket.setSoTimeout(3000);
             DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
@@ -133,7 +164,7 @@ public final class BaichuanTalkTest {
                     case BaichuanTalk.CMD_TALK:
                         check(ext.contains("<binaryData>1</binaryData>"), true);
                         bodies.add(m.payload);  // binary, not encrypted
-                        out.write(BaichuanClientTest.reply24(m.command, m.messageId, 200, new byte[0]));
+                        if (answerBlocks) out.write(BaichuanClientTest.reply24(m.command, m.messageId, 200, new byte[0]));
                         break;
                     case BaichuanTalk.CMD_TALK_RESET:
                         log.add("talk reset");
