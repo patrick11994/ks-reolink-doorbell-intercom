@@ -61,6 +61,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     // older stream, or for a call that has ended, does nothing.
     private int streamGeneration;
     private int reconnects;  // in a row, since a stream last delivered
+    private int decoderRestarts;  // in this call
+    private static final int MAX_DECODER_RESTARTS = 2;
     private AudioRenderer audioRenderer;
     private TalkChannel talk;
     private BaichuanTalk baichuanTalk;  // the Baichuan part of talk, for its encoder load
@@ -490,6 +492,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         log("media: start stream " + s.streamPath + " over " + (s.videoPath.equals("RTSP") ? "RTSP" : "Baichuan") + " (Video over: " + s.videoPath + ")");
         publishText("first_frame", texts.firstPictureReading(), texts.waiting());
         reconnects = 0;
+        decoderRestarts = 0;
         stream = openStream(s, ++streamGeneration);
         stream.start();
         // ONVIF talk opens now and streams silence, so the doorbell's 2 s playout buffer is full by the time anyone
@@ -626,14 +629,22 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         final Surface oldSurface = videoSurface;
         videoOwner = owner;
         videoSurface = surface;
-        videoRenderer = new VideoRenderer(surface, new VideoRenderer.Listener() {
+        videoRenderer = newRenderer(surface, false);
+        if (stream != null) stream.attachVideo(videoRenderer);
+        if (old != null || oldSurface != null) releaseLater(() -> release(old, oldSurface));
+    }
+
+    /** A decoder for the viewer's surface; a replacement for one that failed does not report a first picture again. */
+    private VideoRenderer newRenderer(Surface surface, boolean replacement) {
+        final VideoRenderer[] self = new VideoRenderer[1];
+        self[0] = new VideoRenderer(surface, new VideoRenderer.Listener() {
             @Override public void onVideoSize(int width, int height) {
                 DoorbellView v = view;
                 if (v != null) v.post(() -> v.setVideoSize(width, height));
             }
 
             @Override public void onVideoStats(long firstFrameMillis, double decodeMillis) {
-                if (firstFrameMillis >= 0) {
+                if (firstFrameMillis >= 0 && !replacement) {
                     long sinceRing = System.nanoTime() / 1_000_000 - ringAt;
                     publishText("first_frame", texts.firstPictureReading(), texts.afterRing(sinceRing));
                 }
@@ -643,14 +654,34 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 // null: no keyframe yet. Otherwise the decoder failed, which the log explains.
                 showMessage(message == null ? texts.noPictureYet() : texts.videoNotShown());
                 log(message == null ? texts.noPictureYet() : message);
+                if (message != null) decoderFailed(self[0]);
             }
 
             @Override public void onVideoLog(String message) {
                 log(message);
             }
         });
-        if (stream != null) stream.attachVideo(videoRenderer);
-        if (old != null || oldSurface != null) releaseLater(() -> release(old, oldSurface));
+        return self[0];
+    }
+
+    /**
+     * The decoder stopped with an error mid-call (a transient codec fault, a stream glitch it could not take): a new
+     * one on the same surface, from the stream's last keyframe, at most twice a call. The new one can only connect to
+     * the surface once the failed one has let go of it, so it is made after that release, off this thread.
+     */
+    private synchronized void decoderFailed(VideoRenderer failed) {
+        if (failed == null || failed != videoRenderer || videoSurface == null || decoderRestarts >= MAX_DECODER_RESTARTS) return;
+        decoderRestarts++;
+        final Surface surface = videoSurface;
+        log("video decoder: starting a new one");
+        releaseLater(() -> {
+            failed.release();
+            synchronized (ReolinkPlugin.this) {
+                if (videoRenderer != failed || videoSurface != surface) return;  // the viewer or the call went meanwhile
+                videoRenderer = newRenderer(surface, true);
+                if (stream != null) stream.attachVideo(videoRenderer);
+            }
+        });
     }
 
     /** A decoder, then the surface it drew on: the other way round the decoder writes into a surface that is gone. */
