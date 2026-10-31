@@ -563,6 +563,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
      */
     private synchronized void streamLost(int generation) {
         if (generation != streamGeneration || stopped || !viewerOpen) return;
+        BaichuanClient e = events;
+        if (e != null) e.checkNow();  // the doorbell may be gone altogether: let the ring session find out now too
         ScheduledExecutorService t = ticker;
         if (t == null) return;
         long delay = Math.min(5_000, 1_000L << Math.min(reconnects, 3));

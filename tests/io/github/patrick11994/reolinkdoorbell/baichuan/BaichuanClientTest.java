@@ -28,6 +28,8 @@ public final class BaichuanClientTest {
         framingIsBounded();
         loginSubscribeAndPush();
         silentDoorbellIsNoticed();
+        checkNowFindsASilentDoorbell();
+        checkNowKeepsALiveSession();
         stalledPushStillRings();
         reconnectsAfterADrop(false);
         reconnectsAfterADrop(true);
@@ -140,6 +142,61 @@ public final class BaichuanClientTest {
             doorbell.join(3000);
             check(noticed, true);
             check(log.stream().filter(l -> l.startsWith("ignored")).count() >= 2, true);  // it did keep trying first
+        }
+    }
+
+    /** checkNow: a silent doorbell is noticed within the timeout, long before three keepalive intervals. */
+    static void checkNowFindsASilentDoorbell() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            CountDownLatch up = new CountDownLatch(1), dropped = new CountDownLatch(1);
+            Thread doorbell = new Thread(() -> {
+                try (Socket socket = server.accept()) {
+                    DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+                    if (fakeLogin(in, socket.getOutputStream(), PASSWORD, new CopyOnWriteArrayList<>()) == null) return;
+                    socket.setSoTimeout(5000);
+                    while (true) BcMessage.read(in);  // never answers
+                } catch (Exception closed) {
+                    // The client gave up.
+                }
+            });
+            doorbell.start();
+            BaichuanClient client = new BaichuanClient("127.0.0.1", server.getLocalPort(), USER, PASSWORD, new BaichuanClient.Listener() {
+                @Override public void onConnection(boolean connected, String detail) {
+                    if (connected) up.countDown();
+                    if (detail.contains("stopped answering")) dropped.countDown();
+                }
+                @Override public void onAlarm(AlarmEvents.Event event) {}
+            }, 60_000, 1000);
+            client.start();
+            check(up.await(3, TimeUnit.SECONDS), true);
+            Thread.sleep(200);  // a check asked before the session was up would not concern it
+            client.checkNow();
+            boolean noticed = dropped.await(3, TimeUnit.SECONDS);  // a keepalive interval is a minute here
+            client.stop();
+            doorbell.join(3000);
+            check(noticed, true);
+        }
+    }
+
+    /** checkNow on a doorbell that answers: the session stays up. */
+    static void checkNowKeepsALiveSession() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            List<String> log = new CopyOnWriteArrayList<>();
+            CountDownLatch rang = new CountDownLatch(1);
+            Thread doorbell = new Thread(() -> fakeDoorbell(server, PASSWORD, log));
+            doorbell.start();
+            BaichuanClient client = new BaichuanClient("127.0.0.1", server.getLocalPort(), USER, PASSWORD, new BaichuanClient.Listener() {
+                @Override public void onConnection(boolean connected, String detail) { log.add("connection " + connected + " " + detail); }
+                @Override public void onAlarm(AlarmEvents.Event event) { if (event.visitor()) rang.countDown(); }
+            }, 60_000, 1000);
+            client.start();
+            check(rang.await(3, TimeUnit.SECONDS), true);
+            client.checkNow();
+            Thread.sleep(2500);
+            client.stop();
+            doorbell.join(3000);
+            check(log.stream().anyMatch(l -> l.startsWith("keepalive")), true);  // it asked
+            check(log.stream().filter(l -> l.startsWith("connection true")).count(), 1L);  // and kept the session
         }
     }
 
