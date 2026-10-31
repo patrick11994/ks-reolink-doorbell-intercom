@@ -14,7 +14,9 @@ import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
 
 /**
  * Hardware H.264 decoding onto a Surface, tuned for delay rather than smoothness: frames go to the decoder as they
- * arrive, only the newest decoded frame is shown, and a backlog is dropped up to the next keyframe.
+ * arrive, only the newest decoded frame is shown, and a backlog is dropped up to the next keyframe: when the queue is
+ * full, and once the picture shows, when its oldest frame waited longer than MAX_BEHIND_MILLIS. A decoder slower than
+ * the stream would otherwise let the picture fall seconds behind the sound, without any error.
  */
 final class VideoRenderer implements MediaStream.VideoSink {
     interface Listener {
@@ -30,6 +32,7 @@ final class VideoRenderer implements MediaStream.VideoSink {
         final byte[] data;
         final long micros;
         final boolean keyframe;
+        final long arrived = System.nanoTime() / 1_000_000;
 
         Frame(byte[] data, long micros, boolean keyframe) {
             this.data = data;
@@ -40,10 +43,14 @@ final class VideoRenderer implements MediaStream.VideoSink {
 
     private final Surface surface;
     private final Listener listener;
+    private static final int MAX_BEHIND_MILLIS = 400;
+    // Large enough for the keyframe group the stream replays when the renderer is attached, before the decoder runs.
     private final ArrayBlockingQueue<Frame> queue = new ArrayBlockingQueue<>(60);
     private final long created = System.nanoTime() / 1_000_000;
     private volatile boolean running = true;
     private volatile boolean waitForKeyframe;
+    private volatile boolean showing;  // after the first picture: from then on the queue is bounded by age as well
+    private int dropped;  // backlogs dropped, for the log; on the stream's thread
     private final Thread thread;
 
     VideoRenderer(Surface surface, Listener listener) {
@@ -58,12 +65,22 @@ final class VideoRenderer implements MediaStream.VideoSink {
         if (!running) return;
         if (waitForKeyframe && !keyframe) return;
         waitForKeyframe = false;
-        if (!queue.offer(new Frame(annexB, micros, keyframe))) {
-            // The decoder fell behind: drop the backlog and restart at the next keyframe instead of lagging.
-            queue.clear();
-            waitForKeyframe = !keyframe;
-            if (keyframe) queue.offer(new Frame(annexB, micros, true));
+        Frame frame = new Frame(annexB, micros, keyframe);
+        Frame oldest = showing ? queue.peek() : null;
+        if (oldest != null && frame.arrived - oldest.arrived > MAX_BEHIND_MILLIS) {
+            dropBacklog(frame, "waited " + (frame.arrived - oldest.arrived) + " ms");
+        } else if (!queue.offer(frame)) {
+            dropBacklog(frame, "filled the queue");
         }
+    }
+
+    /** The decoder fell behind: drop the backlog and restart at the next keyframe instead of lagging. */
+    private void dropBacklog(Frame frame, String why) {
+        int frames = queue.size();
+        queue.clear();
+        waitForKeyframe = !frame.keyframe;
+        if (frame.keyframe) queue.offer(frame);
+        if (dropped++ % 10 == 0) listener.onVideoLog("video decoder: behind, " + frames + " frames " + why + ", dropped up to the next keyframe (" + dropped + " times this call)");
     }
 
     void release() {
@@ -180,6 +197,7 @@ final class VideoRenderer implements MediaStream.VideoSink {
                     }
                     if (!shown) {
                         shown = true;
+                        showing = true;
                         listener.onVideoStats(System.nanoTime() / 1_000_000 - created, decodeAverage);
                     } else if (slot % 50 == 0) {
                         listener.onVideoStats(-1, decodeAverage);
