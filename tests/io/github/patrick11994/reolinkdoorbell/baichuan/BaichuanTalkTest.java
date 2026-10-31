@@ -14,7 +14,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import io.github.patrick11994.reolinkdoorbell.talk.ImaAdpcm;
 
 public final class BaichuanTalkTest {
-    static final String ABILITY = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<TalkAbility version=\"1.1\">\n<duplexList>\n<duplex>FDX</duplex>\n"
+    public static final String ABILITY = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<TalkAbility version=\"1.1\">\n<duplexList>\n<duplex>FDX</duplex>\n"
         + "</duplexList>\n<audioStreamModeList>\n<audioStreamMode>followVideoStream</audioStreamMode>\n<audioStreamMode>mixAudioStream</audioStreamMode>\n"
         + "</audioStreamModeList>\n<audioConfigList>\n<audioConfig>\n<priority>0</priority>\n<audioType>adpcm</audioType>\n<sampleRate>16000</sampleRate>\n"
         + "<samplePrecision>16</samplePrecision>\n<lengthPerEncoder>1024</lengthPerEncoder>\n<soundTrack>mono</soundTrack>\n</audioConfig>\n</audioConfigList>\n"
@@ -107,7 +107,7 @@ public final class BaichuanTalkTest {
     }
 
     /** A doorbell's talk session: answers TalkAbility, TalkConfig (busyFirst times 422 first), and every block. */
-    static void fakeTalkDoorbell(ServerSocket server, String ability, int busyFirst, List<String> log, List<byte[]> bodies) {
+    public static void fakeTalkDoorbell(ServerSocket server, String ability, int busyFirst, List<String> log, List<byte[]> bodies) {
         try (Socket socket = server.accept()) {
             socket.setSoTimeout(3000);
             DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));

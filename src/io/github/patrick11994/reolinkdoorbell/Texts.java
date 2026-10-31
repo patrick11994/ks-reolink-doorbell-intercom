@@ -206,5 +206,6 @@ final class Texts {
     String checkAccountDevice() { return get("checkAccountDevice"); }
     String checkNoVideo() { return get("checkNoVideo"); }
     String checkNoTalk() { return get("checkNoTalk"); }
+    String checkNoBaichuanTalk() { return get("checkNoBaichuanTalk"); }
     String checkFailed(String detail) { return format("checkFailed", "detail", detail); }
 }
