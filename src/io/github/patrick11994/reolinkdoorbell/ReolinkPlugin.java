@@ -68,7 +68,12 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private AudioRenderer audioRenderer;
     private TalkChannel talk;
     private BaichuanTalk baichuanTalk;  // the Baichuan part of talk, for its encoder load
-    private boolean talkFromRing;  // ONVIF: talk opens at the ring and stays; Baichuan only while the microphone is on
+    // ONVIF: talk opens at the ring and stays; Baichuan only while the microphone is on. Set from talk's own thread
+    // when Automatic falls back, so volatile.
+    private volatile boolean talkFromRing;
+    // Automatic talk found that this doorbell refuses Baichuan talk: ONVIF straight away, until the settings change,
+    // instead of losing 1-2.5 s on each talk start.
+    private volatile boolean baichuanTalkRefused;
     private MicCapture mic;
     private CallVolume callVolume;
     // The slider's level: updateSettings stores it for later sessions but does not call configure, so settings keeps
@@ -95,6 +100,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         this.host = host;
         Texts.setAssets(host::openAsset);  // the language files under assets/i18n
         settings = new Settings(values);
+        baichuanTalkRefused = false;
         texts = Texts.of(settings.language);
         liveCallVolume = settings.callVolume;
         // Monotonic: a clock set after boot (no RTC battery, NTP) must not end a ring at once or stretch a call.
@@ -166,6 +172,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     @Override public void configure(Map<String, Object> values) {
         Settings previous = settings;
         settings = new Settings(values);
+        baichuanTalkRefused = false;
         texts = Texts.of(settings.language);
         liveCallVolume = settings.callVolume;
         RingController c = controller;
@@ -507,7 +514,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         // presses Answer (it drops audio while that buffer fills). Baichuan talk sets up in about 0.2 s, so it waits
         // for the microphone: an open talk session holds the doorbell's speaker, which would cut the doorbell's own
         // ring tone and refuse a Quick Reply.
-        talkFromRing = s.talkPath.equals("ONVIF");
+        talkFromRing = s.talkPath.equals("ONVIF") || (s.talkPath.equals("Automatic") && baichuanTalkRefused);
         if (talkFromRing) {
             talk = openTalk(s);
             talk.start();
@@ -591,19 +598,26 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     /**
      * The talk path from the Talk setting: Baichuan (about 1 s to the door, 16 kHz), the ONVIF backchannel (about
-     * 2 s, 8 kHz, for doorbells that do not talk over Baichuan), or Automatic: Baichuan, and ONVIF if it is refused.
+     * 2 s, 8 kHz, for doorbells that do not talk over Baichuan), or Automatic: Baichuan, and ONVIF if it is refused,
+     * from then on straight away.
      */
     private TalkChannel openTalk(Settings s) {
         baichuanTalk = null;
         final int generation = ++talkGeneration;
-        if (s.talkPath.equals("ONVIF")) return onvifTalk(s, generation);
+        if (s.talkPath.equals("ONVIF") || (s.talkPath.equals("Automatic") && baichuanTalkRefused)) return onvifTalk(s, generation);
         final FallbackTalk[] fallback = new FallbackTalk[1];
         BaichuanTalk baichuan = new BaichuanTalk(s.host, 9000, s.username, s.password, state -> {
             if (!state.equals("connecting") && !state.equals("open")) log("talk: " + state);
             else if (state.equals("open")) log("talk: open over Baichuan");
             if (state.equals("open")) talkOpened(generation);
             if (state.startsWith("talk refused") && fallback[0] != null) {
-                log("talk: falling back to the ONVIF backchannel");
+                // 422 even after a reset: someone else is talking, which passes. Anything else is the doorbell's way.
+                boolean lasting = !state.contains("answered 422");
+                log("talk: falling back to the ONVIF backchannel" + (lasting ? ", from now on" : " for this call"));
+                if (lasting) {
+                    baichuanTalkRefused = true;
+                    talkFromRing = true;  // ONVIF talk now stays open for the call, as with the ONVIF setting
+                }
                 fallback[0].primaryRefused();
             } else if (state.startsWith("talk refused")) {
                 voiceGoesOut(false);  // the doorbell will refuse again: not retried
