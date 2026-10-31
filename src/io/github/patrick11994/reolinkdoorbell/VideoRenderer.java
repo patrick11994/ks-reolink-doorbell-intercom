@@ -13,10 +13,12 @@ import io.github.patrick11994.reolinkdoorbell.media.AvcConfig;
 import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
 
 /**
- * Hardware H.264 decoding onto a Surface, tuned for delay rather than smoothness: frames go to the decoder as they
- * arrive, only the newest decoded frame is shown, and a backlog is dropped up to the next keyframe: when the queue is
- * full, and once the picture shows, when its oldest frame waited longer than MAX_BEHIND_MILLIS. A decoder slower than
- * the stream would otherwise let the picture fall seconds behind the sound, without any error.
+ * Hardware H.264 decoding onto a Surface, with little delay: frames go to the decoder as they arrive, and each decoded
+ * picture is handed to the display with the time to show it, at the doorbell's own pace (VideoPacer). A picture that
+ * misses its time is shown at once, or dropped when a newer one is ready too. A backlog is dropped up to the next
+ * keyframe: when the queue is full, and once the picture shows, when its oldest frame waited longer than
+ * MAX_BEHIND_MILLIS. A decoder slower than the stream would otherwise let the picture fall seconds behind the sound,
+ * without any error. When it ends, the call's video is summed up in the log.
  */
 final class VideoRenderer implements MediaStream.VideoSink {
     interface Listener {
@@ -50,7 +52,8 @@ final class VideoRenderer implements MediaStream.VideoSink {
     private volatile boolean running = true;
     private volatile boolean waitForKeyframe;
     private volatile boolean showing;  // after the first picture: from then on the queue is bounded by age as well
-    private int dropped;  // backlogs dropped, for the log; on the stream's thread
+    private volatile int dropped;  // backlogs dropped, for the log; counted on the stream's thread
+    private volatile long received, lastArrived = -1, largestGap;  // frames from the stream and the longest wait between two, for the log
     private final Thread thread;
 
     VideoRenderer(Surface surface, Listener listener) {
@@ -66,6 +69,9 @@ final class VideoRenderer implements MediaStream.VideoSink {
         if (waitForKeyframe && !keyframe) return;
         waitForKeyframe = false;
         Frame frame = new Frame(annexB, micros, keyframe);
+        received++;
+        if (lastArrived >= 0) largestGap = Math.max(largestGap, frame.arrived - lastArrived);
+        lastArrived = frame.arrived;
         Frame oldest = showing ? queue.peek() : null;
         if (oldest != null && frame.arrived - oldest.arrived > MAX_BEHIND_MILLIS) {
             dropBacklog(frame, "waited " + (frame.arrived - oldest.arrived) + " ms");
@@ -99,6 +105,8 @@ final class VideoRenderer implements MediaStream.VideoSink {
         long[] queuedMicros = new long[256];
         double decodeAverage = 0;
         boolean shown = false;
+        VideoPacer pacer = new VideoPacer();
+        long superseded = 0;  // late pictures not shown because a newer one was ready
         String stage = "create";  // where a decoder error happened, for the log
         try {
             Frame first = null;
@@ -168,9 +176,10 @@ final class VideoRenderer implements MediaStream.VideoSink {
                         pending = null;
                     }
                 }
-                // Drain everything decoded; show only the newest picture.
-                int newest = -1;
-                long newestMicros = 0;
+                // Hand everything decoded to the display, each picture with its time; of late ones only the newest.
+                long now = System.nanoTime();
+                int late = -1, released = 0;
+                long releasedMicros = 0;
                 while (true) {
                     int output = codec.dequeueOutputBuffer(info, 0);
                     if (output == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
@@ -182,14 +191,25 @@ final class VideoRenderer implements MediaStream.VideoSink {
                         continue;
                     }
                     if (output < 0) break;
-                    if (newest >= 0) codec.releaseOutputBuffer(newest, false);
-                    newest = output;
-                    newestMicros = info.presentationTimeUs;
+                    long at = pacer.displayAt(info.presentationTimeUs, now / 1000) * 1000;
+                    if (late >= 0) {
+                        boolean newerLate = at <= now;
+                        codec.releaseOutputBuffer(late, !newerLate);
+                        if (newerLate) superseded++;
+                        late = -1;
+                    }
+                    if (at <= now) {
+                        late = output;
+                    } else {
+                        codec.releaseOutputBuffer(output, at);
+                    }
+                    released++;
+                    releasedMicros = info.presentationTimeUs;
                 }
-                if (newest >= 0) {
-                    codec.releaseOutputBuffer(newest, true);
+                if (late >= 0) codec.releaseOutputBuffer(late, true);
+                if (released > 0) {
                     for (int i = Math.max(0, slot - 256); i < slot; i++) {
-                        if (queuedMicros[i % 256] == newestMicros) {
+                        if (queuedMicros[i % 256] == releasedMicros) {
                             double millis = (System.nanoTime() - queuedAt[i % 256]) / 1e6;
                             decodeAverage = decodeAverage == 0 ? millis : decodeAverage * 0.9 + millis * 0.1;
                             break;
@@ -214,6 +234,12 @@ final class VideoRenderer implements MediaStream.VideoSink {
         } catch (Exception error) {
             if (running) listener.onVideoError("video decoder: " + error + " at " + stage);
         } finally {
+            if (shown) {
+                listener.onVideoLog("video: " + received + " frames, " + pacer.onTime() + " shown at their pace, " + pacer.late() + " late"
+                    + (superseded > 0 ? " (" + superseded + " of them skipped for a newer one)" : "") + ", longest wait between frames " + largestGap
+                    + " ms, cushion " + pacer.cushionMillis() + " ms, decoder " + Math.round(decodeAverage) + " ms on average"
+                    + (dropped > 0 ? ", backlog dropped " + dropped + " times" : ""));
+            }
             if (codec != null) {
                 try { codec.stop(); } catch (RuntimeException ignored) {}
                 codec.release();
