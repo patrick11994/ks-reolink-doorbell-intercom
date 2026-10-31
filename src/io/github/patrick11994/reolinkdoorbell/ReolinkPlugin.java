@@ -87,8 +87,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     // Taken when the viewer opens: a Talk mode changed mid-call must not split the view from the microphone.
     private volatile boolean callPushToTalk;
     /** How long the door stays down after push to talk lets go: our own voice comes back from the door's microphone
-     * about 1.4 s after we spoke (1 s to the door, 0.4 s back), and should not play at full volume. */
-    private static final long DUCK_TAIL_MILLIS = 1500;
+     * about 1.4 s after we spoke over Baichuan (1 s to the door, 0.4 s back), 2.4 s over ONVIF (2 s to the door), and
+     * should not play at full volume. */
+    private static final long DUCK_TAIL_MILLIS = 1500, ONVIF_DUCK_TAIL_MILLIS = 2700;
     private volatile long countdownStart, countdownMillis;  // shown by the viewer, also one created later
     // The cards' Home Assistant entities: followed only while the viewer is open.
     private final Set<String> followed = new HashSet<>();  // guarded by itself
@@ -872,7 +873,13 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             synchronized (ReolinkPlugin.this) {
                 if (!talking && audioRenderer != null) audioRenderer.setDuck(1f);
             }
-        }, DUCK_TAIL_MILLIS, TimeUnit.MILLISECONDS);
+        }, talkOverOnvif() ? ONVIF_DUCK_TAIL_MILLIS : DUCK_TAIL_MILLIS, TimeUnit.MILLISECONDS);
+    }
+
+    /** Whether the voice goes over the ONVIF backchannel, by setting or because Automatic fell back. */
+    private synchronized boolean talkOverOnvif() {
+        TalkChannel t = talk;
+        return t instanceof Backchannel || (t instanceof FallbackTalk && ((FallbackTalk) t).usingFallback());
     }
 
     /** Why there is no picture, or why it stopped: over the picture area. */
