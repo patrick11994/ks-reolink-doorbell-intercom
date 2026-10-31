@@ -64,6 +64,20 @@ final class ConnectionCheck {
         return new Result(true, texts.checkOk());
     }
 
+    /**
+     * Why the event session dropped, in a few words for the status and the connection reading. The detail is the
+     * session's own (an exception and its message), which only the log shows.
+     */
+    static String problem(String detail, Texts texts) {
+        if (detail.contains("account device")) return texts.problemAccountDevice();
+        if (detail.contains("refused the username or password")) return texts.problemLogin();
+        if (detail.contains("stopped answering") || detail.contains("stopped in the middle")) return texts.problemNotAnswering();
+        for (String unreachable : new String[] {"ConnectException", "NoRouteToHostException", "UnknownHostException", "SocketTimeoutException", "EHOSTUNREACH", "ENETUNREACH"}) {
+            if (detail.contains(unreachable)) return texts.problemUnreachable();
+        }
+        return texts.problemLost();
+    }
+
     private static boolean baichuanTalk(String host, int port, String username, String password) {
         try {
             return BaichuanTalk.probe(host, port, username, password) != null;
