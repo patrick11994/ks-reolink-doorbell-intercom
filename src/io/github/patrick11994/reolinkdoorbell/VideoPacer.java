@@ -30,7 +30,7 @@ final class VideoPacer {
     private long periodStart = -1, periodHighest;
     private int periodLate;
     private int cushionMillis = START_MILLIS;
-    private long onTime, late;
+    private long onTime, late, behind;
 
     /** The time to show a picture captured at captureMicros, ready at nowMicros on the same clock as the result. */
     long displayAt(long captureMicros, long nowMicros) {
@@ -51,7 +51,8 @@ final class VideoPacer {
         }
         anchor += Math.max(-SLEW_MICROS, Math.min(SLEW_MICROS, target - anchor));
         if (periodStart < 0) periodStart = nowMicros;
-        periodHighest = Math.max(periodHighest, lateness - anchor);
+        behind = lateness - anchor;
+        periodHighest = Math.max(periodHighest, behind);
         boolean missed = lateness > anchor + cushion;
         if (missed) {
             late++;
@@ -67,6 +68,11 @@ final class VideoPacer {
             restartPeriod(nowMicros);
         }
         return missed ? nowMicros : captureMicros + anchor + cushion;
+    }
+
+    /** How much later than the lowest lateness the last picture was ready, in milliseconds: what the cushion has to cover. */
+    long behindMillis() {
+        return behind / 1000;
     }
 
     int cushionMillis() {
