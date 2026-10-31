@@ -91,6 +91,28 @@ final class AudioRenderer implements MediaStream.AudioSink {
         }
     }
 
+    /** A voice-call track for 16-bit PCM, sized for the jitter buffer and started as soon as the cushion is in. */
+    private static AudioTrack newTrack(int rate, int channels) {
+        int mask = channels == 1 ? AudioFormat.CHANNEL_OUT_MONO : AudioFormat.CHANNEL_OUT_STEREO;
+        int minimum = AudioTrack.getMinBufferSize(rate, mask, AudioFormat.ENCODING_PCM_16BIT);
+        AudioTrack track = new AudioTrack.Builder()
+            .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(mask).build())
+            .setBufferSizeInBytes(Math.max(minimum, rate * 2 * channels * CAPACITY_MILLIS / 1000))
+            .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .build();
+        // Android 12+ only starts a streaming track once its buffer is full; ours never fills that far on purpose.
+        if (android.os.Build.VERSION.SDK_INT >= 31) {
+            try {
+                track.setStartThresholdInFrames(Math.min(rate * START_MILLIS / 1000, track.getBufferSizeInFrames()));
+            } catch (RuntimeException refused) {
+                // Keeps the default threshold.
+            }
+        }
+        return track;
+    }
+
     private void run() {
         audioPriority();
         MediaCodec codec = null;
@@ -105,37 +127,16 @@ final class AudioRenderer implements MediaStream.AudioSink {
             codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_AAC);
             codec.configure(format, null, null, 0);
             codec.start();
-            int minimum = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
-            track = new AudioTrack.Builder()
-                .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                .setBufferSizeInBytes(Math.max(minimum, rate * 2 * CAPACITY_MILLIS / 1000))
-                .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .build();
-            // Android 12+ only starts a streaming track once its buffer is full; ours never fills that far on purpose.
-            if (android.os.Build.VERSION.SDK_INT >= 31) {
-                try {
-                    track.setStartThresholdInFrames(Math.min(rate * START_MILLIS / 1000, track.getBufferSizeInFrames()));
-                } catch (RuntimeException refused) {
-                    // Keeps the default threshold.
-                }
-            }
-            // Start at once with START_MILLIS of silence as the jitter cushion, so playback never waits on the network.
-            track.play();
-            byte[] cushion = new byte[rate * 2 * START_MILLIS / 1000];
-            track.write(cushion, 0, cushion.length);
-            // What queued up while the decoder and track were set up is old already: behind the cushion it would be
-            // delay for the whole call. The newest frame starts the sound.
-            byte[] newest = null;
-            for (byte[] f = queue.poll(); f != null; f = queue.poll()) newest = f;
-            if (newest != null) queue.offer(newest);
-            JitterDrain drain = new JitterDrain(cushion.length / 2);
+            // The track follows what the decoder puts out, not what the container said: HE-AAC doubles the rate and
+            // stereo or parametric stereo doubles the channels, which would otherwise play at the wrong speed.
+            int trackRate = 0, channels = 0, frameBytes = 2;
+            byte[] cushion = new byte[0];
+            JitterDrain drain = null;
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
             byte[] pcm = new byte[8192];
-            long frames = 0, written = cushion.length / 2;  // samples handed to the track
+            long frames = 0, written = 0;  // frames handed to the track
             while (running) {
-                if (volumeChanged) {
+                if (volumeChanged && track != null) {
                     volumeChanged = false;
                     track.setVolume(gain * duck);
                 }
@@ -150,22 +151,56 @@ final class AudioRenderer implements MediaStream.AudioSink {
                     }
                 }
                 for (int output = codec.dequeueOutputBuffer(info, 0); output >= 0 || output == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED; output = codec.dequeueOutputBuffer(info, 0)) {
-                    if (output < 0) continue;
+                    if (output == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED || track == null) {
+                        MediaFormat out = codec.getOutputFormat();
+                        int r = out.getInteger(MediaFormat.KEY_SAMPLE_RATE), c = out.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+                        if (track == null || r != trackRate || c != channels) {
+                            if (c < 1 || c > 2) throw new IllegalStateException("the doorbell's audio has " + c + " channels");
+                            boolean first = track == null;
+                            if (track != null) {
+                                try { track.stop(); } catch (RuntimeException ignored) {}
+                                track.release();
+                                track = null;
+                            }
+                            trackRate = r;
+                            channels = c;
+                            frameBytes = 2 * c;
+                            track = newTrack(r, c);
+                            volumeChanged = false;
+                            track.setVolume(gain * duck);  // before any sound: a ducked or turned-down door stays so
+                            // Start at once with START_MILLIS of silence as the jitter cushion, so playback never waits on
+                            // the network.
+                            track.play();
+                            cushion = new byte[r * START_MILLIS / 1000 * frameBytes];
+                            track.write(cushion, 0, cushion.length);
+                            written = cushion.length / frameBytes;
+                            drain = new JitterDrain(written);
+                            if (first) {
+                                // What queued up while the decoder and track were set up is old already: behind the
+                                // cushion it would be delay for the whole call. The newest frame carries on.
+                                byte[] newest = null;
+                                for (byte[] f = queue.poll(); f != null; f = queue.poll()) newest = f;
+                                if (newest != null) queue.offer(newest);
+                            }
+                        }
+                        if (output < 0) continue;
+                    }
                     ByteBuffer out = codec.getOutputBuffer(output);
-                    int size = Math.min(info.size, pcm.length);
+                    if (pcm.length < info.size) pcm = new byte[info.size];
+                    int size = info.size - info.size % frameBytes;
                     out.position(info.offset);
                     out.get(pcm, 0, size);
                     codec.releaseOutputBuffer(output, false);
                     long buffered = written - (track.getPlaybackHeadPosition() & 0xFFFFFFFFL);
-                    if (buffered * 1000 / rate > MAX_MILLIS) continue;  // too far behind: skip this piece
-                    if (drain.skip(buffered, size / 2, JitterDrain.quiet(pcm, size), System.nanoTime() / 1_000_000)) continue;
+                    if (buffered * 1000 / trackRate > MAX_MILLIS) continue;  // too far behind: skip this piece
+                    if (drain.skip(buffered, size / frameBytes, JitterDrain.quiet(pcm, size), System.nanoTime() / 1_000_000)) continue;
                     if (buffered <= 0) {
                         // Ran dry: rebuild the cushion so the next network hiccup does not cut the sound again.
                         track.write(cushion, 0, cushion.length);
-                        written += cushion.length / 2;
+                        written += cushion.length / frameBytes;
                     }
                     track.write(pcm, 0, size);
-                    written += size / 2;
+                    written += size / frameBytes;
                 }
             }
         } catch (InterruptedException stopped) {
