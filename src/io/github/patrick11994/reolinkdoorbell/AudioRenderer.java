@@ -79,7 +79,20 @@ final class AudioRenderer implements MediaStream.AudioSink {
         }
     }
 
+    /**
+     * Audio priority for the calling thread, as Android's own audio threads have: a short wait for the CPU then does
+     * not cut the sound. Not URGENT_AUDIO, which belongs to the audio system itself.
+     */
+    static void audioPriority() {
+        try {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO);
+        } catch (RuntimeException refused) {
+            // Plays at the default priority.
+        }
+    }
+
     private void run() {
+        audioPriority();
         MediaCodec codec = null;
         AudioTrack track = null;
         try {

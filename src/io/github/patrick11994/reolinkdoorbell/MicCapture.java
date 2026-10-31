@@ -73,6 +73,7 @@ final class MicCapture {
     }
 
     private void run() {
+        AudioRenderer.audioPriority();
         AudioRecord recorder = null;
         int rate = 0;
         String opened = null;
