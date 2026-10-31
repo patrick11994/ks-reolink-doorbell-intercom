@@ -79,6 +79,11 @@ final class DoorbellView extends FrameLayout {
     private final SeekBar volume;
     private int videoWidth, videoHeight;
     private boolean pictureShown;
+    // The picture stopped (the stream ended, the decoder failed): it stays frozen on its last frame, so a message goes
+    // over it until frames come again. Frames already on their way when it stopped do not count as coming again.
+    private boolean pictureLost;
+    private long pictureLostAt;
+    private static final long LOST_SETTLE_MILLIS = 1000;
     private long countdownStart, countdownMillis;  // the auto-close countdown the ring around Hang up shows
     private final TextView title;
     private final TextView speaking;
@@ -156,6 +161,9 @@ final class DoorbellView extends FrameLayout {
             @Override public void onSurfaceTextureUpdated(SurfaceTexture texture) {
                 if (!pictureShown) {
                     pictureShown = true;
+                    placeholder.setVisibility(GONE);
+                } else if (pictureLost && System.nanoTime() / 1_000_000 - pictureLostAt > LOST_SETTLE_MILLIS) {
+                    pictureLost = false;
                     placeholder.setVisibility(GONE);
                 }
             }
@@ -535,11 +543,18 @@ final class DoorbellView extends FrameLayout {
         fit();
     }
 
-    /** Shown over the picture area while there is no picture, such as when the stream fails. */
+    /**
+     * Why there is no picture: shown in the picture area while there is none yet, or over a picture that stopped, on
+     * a dark veil so a frozen frame does not pass for a visitor standing still.
+     */
     void setMessage(String message) {
-        if (pictureShown) return;
         placeholder.setText(message);
+        placeholder.setBackgroundColor(pictureShown ? 0xB3000000 : 0);
         placeholder.setVisibility(VISIBLE);
+        if (pictureShown) {
+            pictureLost = true;
+            pictureLostAt = System.nanoTime() / 1_000_000;
+        }
     }
 
     /** Scales the picture to the largest size that shows all of it, centred. */
