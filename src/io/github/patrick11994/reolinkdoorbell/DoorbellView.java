@@ -862,7 +862,7 @@ final class DoorbellView extends FrameLayout {
         // The overlay hides its controls, the chip among them, during a call: show them for as long as the notice.
         if (controlsHidden) setControlsHidden(false);
         removeCallbacks(hideControls);
-        postDelayed(hideControls, NOTICE_MILLIS);
+        if (!talking) postDelayed(hideControls, NOTICE_MILLIS);  // held: letting go schedules the hide
     }
 
     private void showChipNote(String text, long millis) {

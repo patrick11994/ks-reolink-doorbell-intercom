@@ -28,8 +28,8 @@ public final class BaichuanTalk implements TalkChannel {
     static final int MEDIA_ADPCM = 0x62773130, MEDIA_ADPCM_DATA = 0x0100;
     public static final int RATE = 16000;
     static final int SURVIVORS = 16;  // the ADPCM trellis: still above G.711 on speech, at half the cost of 32 paths
-    private static final int MAX_BLOCK_CODES = 4096;
-    private static final int QUIET_PEAK = 1000;  // a 16-bit microphone sample below this is near silence, about -30 dBFS  // a lengthPerEncoder beyond this is not a real doorbell
+    private static final int MAX_BLOCK_CODES = 4096;  // a lengthPerEncoder beyond this is not a real doorbell
+    private static final int QUIET_PEAK = 1000;  // a 16-bit microphone sample below this is near silence, about -30 dBFS
     private static final Pattern TAG = Pattern.compile("<(\\w+)>([^<]*)</\\1>");
 
     private final String host, username, password;
