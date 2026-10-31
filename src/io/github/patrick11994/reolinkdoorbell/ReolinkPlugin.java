@@ -243,6 +243,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 if (events != self[0]) return;
                 Texts t = texts;
                 boolean connecting = "connecting".equals(detail);
+                // Retrying after a drop: keep saying what is wrong, rather than flipping to "connecting" every few seconds.
+                if (connecting && !logged.isEmpty() && !logged.equals("connected")) return;
                 if (!connecting && !detail.equals(logged)) log("events: " + detail);
                 if (!connecting) logged = detail;
                 String shown = connected ? t.connected() : connecting ? t.connectingState() : ConnectionCheck.problem(detail, t);
