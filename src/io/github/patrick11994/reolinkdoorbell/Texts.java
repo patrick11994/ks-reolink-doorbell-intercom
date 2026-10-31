@@ -146,7 +146,11 @@ final class Texts {
     String holdToTalkHint() { return get("holdToTalkHint"); }
     String connecting() { return get("connecting"); }
     String noPictureYet() { return get("noPictureYet"); }
-    String noVideo(String reason) { return format("noVideo", "reason", reason); }
+    String noVideo() { return get("noVideo"); }
+    String videoStopped() { return get("videoStopped"); }
+    String videoNotShown() { return get("videoNotShown"); }
+    String doorSoundStopped() { return get("doorSoundStopped"); }
+    String voiceNotThrough() { return get("voiceNotThrough"); }
     String noMicrophone() { return get("noMicrophone"); }
     String defaultName() { return get("defaultName"); }
 
