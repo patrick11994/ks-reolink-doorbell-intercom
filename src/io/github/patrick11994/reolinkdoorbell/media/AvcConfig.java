@@ -63,8 +63,25 @@ public final class AvcConfig {
         return size == null ? text : text + ", " + size.width + "x" + size.height;
     }
 
+    /** The access unit with its SPS replaced by sps, or itself when it has none. */
+    public static byte[] withSps(byte[] annexB, byte[] sps) {
+        int[] at = find(annexB, NAL_SPS);
+        if (at == null) return annexB;
+        byte[] out = new byte[annexB.length - (at[1] - at[0]) + sps.length];
+        System.arraycopy(annexB, 0, out, 0, at[0]);
+        System.arraycopy(sps, 0, out, at[0], sps.length);
+        System.arraycopy(annexB, at[1], out, at[0] + sps.length, annexB.length - at[1]);
+        return out;
+    }
+
     /** The first NAL unit of a type, found behind a 3- or 4-byte start code. */
     static byte[] nal(byte[] annexB, int type) {
+        int[] at = find(annexB, type);
+        return at == null ? null : java.util.Arrays.copyOfRange(annexB, at[0], at[1]);
+    }
+
+    /** Where the first NAL unit of a type starts, after its start code, and ends; or null. */
+    private static int[] find(byte[] annexB, int type) {
         int i = 0;
         while ((i = next(annexB, i)) >= 0) {
             int start = i;
@@ -72,11 +89,7 @@ public final class AvcConfig {
             end = end < 0 ? annexB.length : end - 3;  // back over the next start code
             // A NAL unit never ends in a zero byte: what is left is a 4-byte start code's first byte or padding.
             while (end > start && annexB[end - 1] == 0) end--;
-            if (start < annexB.length && (annexB[start] & 0x1F) == type && end > start) {
-                byte[] out = new byte[end - start];
-                System.arraycopy(annexB, start, out, 0, out.length);
-                return out;
-            }
+            if (start < annexB.length && (annexB[start] & 0x1F) == type && end > start) return new int[] {start, end};
             i = start;
         }
         return null;

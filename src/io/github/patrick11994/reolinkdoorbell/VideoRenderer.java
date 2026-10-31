@@ -11,9 +11,11 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import io.github.patrick11994.reolinkdoorbell.media.AvcConfig;
 import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
+import io.github.patrick11994.reolinkdoorbell.media.SpsInfo;
 
 /**
- * Hardware H.264 decoding onto a Surface, with little delay: frames go to the decoder as they arrive, and each decoded
+ * Hardware H.264 decoding onto a Surface, with little delay: frames go to the decoder as they arrive, with an SPS that
+ * rules out reordering so the decoder holds none back (SpsInfo.lowDelay), and each decoded
  * picture is handed to the display with the time to show it, at the doorbell's own pace (VideoPacer). A picture that
  * misses its time is shown at once, or dropped when a newer one is ready too. A backlog is dropped up to the next
  * keyframe: when the queue is full, and once the picture shows, when its oldest frame waited longer than
@@ -151,9 +153,13 @@ final class VideoRenderer implements MediaStream.VideoSink {
             if (first == null) return;
             AvcConfig config = AvcConfig.of(first.data);
             MediaFormat format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, config.size == null ? 1920 : config.size.width, config.size == null ? 1080 : config.size.height);
+            // The doorbell's SPS has no VUI, so a decoder has to allow for reordering and may hold back pictures: the
+            // panel's held each keyframe 450 ms. Its frames come in filming order, so the SPS can say there is none.
+            // Every keyframe's SPS is replaced the same way.
+            byte[] spsIn = config.sps, spsOut = config.sps == null ? null : SpsInfo.lowDelay(config.sps);
             // The parameter sets up front as well as in the stream: older decoders, such as MediaTek's, want them there.
             if (config.complete()) {
-                format.setByteBuffer("csd-0", ByteBuffer.wrap(AvcConfig.withStartCode(config.sps)));
+                format.setByteBuffer("csd-0", ByteBuffer.wrap(AvcConfig.withStartCode(spsOut != null ? spsOut : config.sps)));
                 format.setByteBuffer("csd-1", ByteBuffer.wrap(AvcConfig.withStartCode(config.pps)));
             }
             format.setInteger(MediaFormat.KEY_PRIORITY, 0);  // realtime
@@ -171,6 +177,7 @@ final class VideoRenderer implements MediaStream.VideoSink {
             }
             listener.onVideoLog("video decoder: " + codec.getName() + (Build.VERSION.SDK_INT >= 29 && !codec.getCodecInfo().isHardwareAccelerated() ? " (software)" : "")
                 + ", " + config.describe() + ", parameter sets " + (config.complete() ? "up front" : "missing from the keyframe")
+                + (spsOut != null ? ", no reordering added to the SPS" : "")
                 + ", low latency " + (lowLatency ? "on" : "not offered"));
             stage = "configure";
             codec.configure(format, surface, null, 0);
@@ -189,9 +196,18 @@ final class VideoRenderer implements MediaStream.VideoSink {
                     if (input >= 0) {
                         ByteBuffer buffer = codec.getInputBuffer(input);
                         buffer.clear();
-                        if (pending.data.length <= buffer.remaining()) {
-                            buffer.put(pending.data);
-                            codec.queueInputBuffer(input, 0, pending.data.length, pending.micros, 0);
+                        byte[] data = pending.data;
+                        if (pending.keyframe && spsOut != null) {
+                            byte[] sps = AvcConfig.of(data).sps;
+                            if (sps != null && !java.util.Arrays.equals(sps, spsIn)) {
+                                spsIn = sps;  // the doorbell changed its stream: the SPS anew
+                                spsOut = SpsInfo.lowDelay(sps);
+                            }
+                            if (sps != null && spsOut != null) data = AvcConfig.withSps(data, spsOut);
+                        }
+                        if (data.length <= buffer.remaining()) {
+                            buffer.put(data);
+                            codec.queueInputBuffer(input, 0, data.length, pending.micros, 0);
                             queuedAt[slot % 256] = System.nanoTime();
                             queuedMicros[slot % 256] = pending.micros;
                             queuedKey[slot % 256] = pending.keyframe;
@@ -199,7 +215,7 @@ final class VideoRenderer implements MediaStream.VideoSink {
                         } else {
                             if (!warnedTooLarge) {
                                 warnedTooLarge = true;
-                                listener.onVideoLog("video decoder: a frame of " + pending.data.length + " bytes does not fit its " + buffer.remaining() + "-byte input buffer, dropped");
+                                listener.onVideoLog("video decoder: a frame of " + data.length + " bytes does not fit its " + buffer.remaining() + "-byte input buffer, dropped");
                             }
                             codec.queueInputBuffer(input, 0, 0, pending.micros, 0);
                         }
