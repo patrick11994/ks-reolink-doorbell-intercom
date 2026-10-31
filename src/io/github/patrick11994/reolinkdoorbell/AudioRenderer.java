@@ -14,8 +14,9 @@ import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
 /**
  * The doorbell's microphone on the panel speaker: AAC decoded and played as voice-call audio, which on this panel
  * gets the vendor's echo suppression (media audio does not). A small jitter buffer smooths the doorbell's 64 ms
- * packets: playback starts with START_MILLIS of silence as a cushion, and audio is only skipped when more than
- * MAX_MILLIS piles up, so the delay stays bounded without gaps from ordinary network jitter.
+ * packets: playback starts with START_MILLIS of silence as a cushion, audio is skipped when more than MAX_MILLIS
+ * piles up, and a level a burst left above the cushion is drained back slowly (JitterDrain), so the delay stays near
+ * START_MILLIS without gaps from ordinary network jitter.
  */
 final class AudioRenderer implements MediaStream.AudioSink {
     interface Listener {
@@ -111,6 +112,12 @@ final class AudioRenderer implements MediaStream.AudioSink {
             track.play();
             byte[] cushion = new byte[rate * 2 * START_MILLIS / 1000];
             track.write(cushion, 0, cushion.length);
+            // What queued up while the decoder and track were set up is old already: behind the cushion it would be
+            // delay for the whole call. The newest frame starts the sound.
+            byte[] newest = null;
+            for (byte[] f = queue.poll(); f != null; f = queue.poll()) newest = f;
+            if (newest != null) queue.offer(newest);
+            JitterDrain drain = new JitterDrain(cushion.length / 2);
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
             byte[] pcm = new byte[8192];
             long frames = 0, written = cushion.length / 2;  // samples handed to the track
@@ -138,6 +145,7 @@ final class AudioRenderer implements MediaStream.AudioSink {
                     codec.releaseOutputBuffer(output, false);
                     long buffered = written - (track.getPlaybackHeadPosition() & 0xFFFFFFFFL);
                     if (buffered * 1000 / rate > MAX_MILLIS) continue;  // too far behind: skip this piece
+                    if (drain.skip(buffered, size / 2, JitterDrain.quiet(pcm, size), System.nanoTime() / 1_000_000)) continue;
                     if (buffered <= 0) {
                         // Ran dry: rebuild the cushion so the next network hiccup does not cut the sound again.
                         track.write(cushion, 0, cushion.length);
