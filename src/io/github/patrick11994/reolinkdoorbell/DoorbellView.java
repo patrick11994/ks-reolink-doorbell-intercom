@@ -125,6 +125,7 @@ final class DoorbellView extends FrameLayout {
     private boolean micOn;
     private boolean pushToTalk;  // the Talk mode setting: in a call the microphone button is held to talk
     private boolean talking;  // push to talk is held right now
+    private boolean voiceGoesOut = true;  // the microphone is live and talk is open, as the plugin last reported
     private boolean renderPending;  // the buttons changed while Hold to talk was held
     private boolean arrangePending, pendingWide;  // the layout changed while Hold to talk was held
     private long talkDownAt;
@@ -821,7 +822,14 @@ final class DoorbellView extends FrameLayout {
         }
     }
 
+    /** Whether the voice really reaches the door: the chip must never say the microphone is live when it is not. */
+    void setVoiceGoesOut(boolean works) {
+        voiceGoesOut = works;
+        if (!chipNote) speaking.setVisibility(speakingVisibility());
+    }
+
     private int speakingVisibility() {
+        if (!voiceGoesOut) return GONE;
         if (pushToTalk) return talking ? VISIBLE : GONE;
         return state == State.IN_CALL && micOn ? VISIBLE : GONE;
     }
