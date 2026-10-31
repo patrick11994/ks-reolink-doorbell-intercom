@@ -105,7 +105,7 @@ public final class BaichuanClientTest {
             }, 500, 2000);
             client.start();
             boolean rang = visitor.await(5, TimeUnit.SECONDS);
-            Thread.sleep(1200);  // long enough for a keepalive
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> log.stream().anyMatch(l -> l.startsWith("keepalive")), 5000, "a keepalive");
             client.stop();
             doorbell.join(3000);
             check(rang, true);
@@ -169,9 +169,14 @@ public final class BaichuanClientTest {
             }, 60_000, 1000);
             client.start();
             check(up.await(3, TimeUnit.SECONDS), true);
-            Thread.sleep(200);  // a check asked before the session was up would not concern it
-            client.checkNow();
-            boolean noticed = dropped.await(3, TimeUnit.SECONDS);  // a keepalive interval is a minute here
+            // A check asked in the session's first millisecond does not concern it (a new session is alive): ask
+            // until one does, as the plugin does on each stream that drops.
+            boolean noticed = false;
+            for (int i = 0; i < 30 && !noticed; i++) {
+                client.checkNow();
+                noticed = dropped.await(100, TimeUnit.MILLISECONDS);
+            }
+            if (!noticed) noticed = dropped.await(3, TimeUnit.SECONDS);  // a keepalive interval is a minute here
             client.stop();
             doorbell.join(3000);
             check(noticed, true);
@@ -192,7 +197,8 @@ public final class BaichuanClientTest {
             client.start();
             check(rang.await(3, TimeUnit.SECONDS), true);
             client.checkNow();
-            Thread.sleep(2500);
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> log.stream().anyMatch(l -> l.startsWith("keepalive")), 5000, "the keepalive the check asks");
+            Thread.sleep(1500);  // past the 1 s timeout: the answered check must not drop the session
             client.stop();
             doorbell.join(3000);
             check(log.stream().anyMatch(l -> l.startsWith("keepalive")), true);  // it asked
