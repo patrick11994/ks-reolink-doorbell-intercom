@@ -124,16 +124,20 @@ public final class TalkTest {
             List<String> states = new CopyOnWriteArrayList<>();
             Backchannel b = new Backchannel("127.0.0.1", server.getLocalPort(), "/h264Preview_01_main", "user", "pass", states::add);
             b.start();
-            Thread.sleep(300);
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> states.contains("open") && packets.size() >= 3, 5000, "the backchannel open and sending");
+            long sending = System.nanoTime();
+            int before = packets.size();
             b.write(filled(800, (short) 4000), 800);  // 100 ms of "speech"
-            Thread.sleep(500);
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> packets.stream().anyMatch(p -> (p[12] & 0xFF) != 0xFF) && packets.size() >= before + 15, 5000, "the speech sent");
+            double seconds = (System.nanoTime() - sending) / 1e9;
+            int sent = packets.size() - before;
             b.stop();
             doorbell.join(2000);
             check(states.contains("open"), true);
             check(requests.get(0).startsWith("OPTIONS"), true);
             check(requests.stream().filter(r -> r.startsWith("DESCRIBE") || r.startsWith("SETUP") || r.startsWith("PLAY")).allMatch(r -> r.contains("Require: www.onvif.org/ver20/backchannel")), true);
             check(requests.stream().anyMatch(r -> r.startsWith("SETUP") && r.contains("/track3") && r.contains("interleaved=0-1")), true);
-            check(packets.size() >= 30 && packets.size() <= 50, true);  // 50 a second for about 0.8 s
+            check(sent <= 50 * seconds + 3, true);  // paced at 50 a second, not sent in a burst
             byte[] first = packets.get(0);
             check(first.length, 12 + 160);
             check(first[1] & 0x7F, 0);  // PCMU

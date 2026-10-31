@@ -99,7 +99,7 @@ public final class BaichuanStreamTest {
                 @Override public void onAudio(byte[] frame, long micros) { seen.add("audio " + frame.length + " @" + micros); }
             });
             stream.start();
-            Thread.sleep(500);
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> seen.size() >= 5, 5000, "the fake doorbell's frames");
             check(stream.firstKeyframeMillis() >= 0, true);
             stream.stop();
             doorbell.join(3000);
