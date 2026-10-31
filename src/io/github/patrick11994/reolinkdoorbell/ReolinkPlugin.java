@@ -56,6 +56,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private MediaStream stream;
     private VideoRenderer videoRenderer;
     private Object videoOwner;  // the view whose surface the decoder draws on
+    private Surface videoSurface;  // that surface: released after its decoder, never before
     private AudioRenderer audioRenderer;
     private TalkChannel talk;
     private BaichuanTalk baichuanTalk;  // the Baichuan part of talk, for its encoder load
@@ -581,7 +582,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         // The old viewer's decoder: released off this (main) thread, which waiting for it would hold up, together
         // with the new viewer's first picture and every tap. Its surface lives until its own viewer goes.
         final VideoRenderer old = videoRenderer;
+        final Surface oldSurface = videoSurface;
         videoOwner = owner;
+        videoSurface = surface;
         videoRenderer = new VideoRenderer(surface, new VideoRenderer.Listener() {
             @Override public void onVideoSize(int width, int height) {
                 DoorbellView v = view;
@@ -606,7 +609,13 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             }
         });
         if (stream != null) stream.attachVideo(videoRenderer);
-        if (old != null) releaseLater(old::release);
+        if (old != null || oldSurface != null) releaseLater(() -> release(old, oldSurface));
+    }
+
+    /** A decoder, then the surface it drew on: the other way round the decoder writes into a surface that is gone. */
+    private static void release(VideoRenderer renderer, Surface surface) {
+        if (renderer != null) renderer.release();
+        if (surface != null) surface.release();
     }
 
     private synchronized void detachVideo(Object owner) {
@@ -614,8 +623,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         if (owner != videoOwner) return;  // an old viewer going away after a new one took over
         videoOwner = null;
         if (stream != null) stream.attachVideo(null);
-        if (videoRenderer != null) videoRenderer.release();
+        release(videoRenderer, videoSurface);  // now: the surface's texture is freed when this callback returns
         videoRenderer = null;
+        videoSurface = null;
     }
 
     /**
@@ -636,6 +646,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         logTalk();
         final MediaStream oldStream = stream;
         final VideoRenderer oldVideo = videoRenderer;
+        final Surface oldSurface = videoSurface;
         final AudioRenderer oldAudio = audioRenderer;
         final TalkChannel oldTalk = talk;
         final MicCapture oldMic = mic;
@@ -644,11 +655,14 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         mic = null;
         stream = null;
         videoRenderer = null;
+        videoSurface = null;
         videoOwner = null;
         audioRenderer = null;
         if (callVolume != null) callVolume.restore();
         if (callMode != null) callMode.leave();  // here, not on the cleanup thread, so it cannot undo a next call's
         Thread cleanup = new Thread(() -> {
+            // The decoder first: it needs no network, and a quick next ring may need it back (some panels have few).
+            release(oldVideo, oldSurface);
             try {
                 if (oldStream != null) oldStream.stop();
             } catch (RuntimeException ignored) {
@@ -656,7 +670,6 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             }
             if (oldMic != null) oldMic.release();
             if (oldTalk != null) oldTalk.stop();
-            if (oldVideo != null) oldVideo.release();
             if (oldAudio != null) oldAudio.release();
         }, "reolink-cleanup");
         cleanup.setDaemon(true);
