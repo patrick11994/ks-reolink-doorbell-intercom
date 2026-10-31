@@ -183,7 +183,15 @@ python3 tools/test.py     # unit tests, with a fake doorbell
 python3 tools/build.py    # dist/reolink-doorbell-<version>.zip
 ```
 
-To test a local build, install the ZIP through **Plugin Manager > Developer Tools > Install from ZIP**. Releases are built by the GitHub Actions workflow when you publish a release, with the tag as the version.
+To test a local build, install the ZIP through **Plugin Manager > Developer Tools > Install from ZIP**.
+
+Releases are immutable, so a release is never published by hand. The GitHub Actions workflow builds it from the tag and publishes it last:
+
+1. Create a draft release with its notes: `gh release create vX.Y.Z --draft --target main --notes-file notes.md`
+2. Push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
+3. The workflow tests, builds with the tag as the version, attaches the files to the draft and publishes it.
+
+If the workflow fails, the draft stays. Fix the cause and run it again with `gh workflow run build.yml --ref vX.Y.Z`. Do not publish the draft yourself: once a tag has been on a published immutable release, it can never take files again.
 
 ## Credits
 
