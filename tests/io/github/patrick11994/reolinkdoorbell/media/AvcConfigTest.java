@@ -37,6 +37,22 @@ public final class AvcConfigTest {
         check(AvcConfig.of(new byte[0]).complete(), false);
         check(AvcConfig.of(new byte[] {0, 0, 1}).complete(), false);
 
+        // The SPS with no reordering promised: the same picture, now with VUI, and left alone once it has it.
+        for (String base64 : new String[] {"Z2QAM6wVFKCgPZA=", "Z2QAM6wVFKAoAPGQ"}) {  // sub and main stream
+            byte[] original = Base64.getDecoder().decode(base64);
+            byte[] lowDelay = SpsInfo.lowDelay(original);
+            check(SpsInfo.parse(lowDelay).width, SpsInfo.parse(original).width);
+            check(SpsInfo.parse(lowDelay).height, SpsInfo.parse(original).height);
+            check(SpsInfo.lowDelay(lowDelay) == null, true);
+        }
+        check(SpsInfo.lowDelay(new byte[] {0x67}) == null, true);
+
+        // An access unit gets the new SPS in place of its own; one without an SPS stays as it is.
+        byte[] newSps = {0x67, 1, 2, 3, 4, 5, 6};
+        check(Arrays.equals(AvcConfig.withSps(concat(start4(), sps, start4(), pps, start4(), idr), newSps), concat(start4(), newSps, start4(), pps, start4(), idr)), true);
+        byte[] plain = concat(start4(), idr);
+        check(AvcConfig.withSps(plain, newSps) == plain, true);
+
         System.out.println("AvcConfigTest passed");
     }
 
