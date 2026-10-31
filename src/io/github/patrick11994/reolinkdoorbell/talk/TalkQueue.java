@@ -33,6 +33,20 @@ public final class TalkQueue {
         }
     }
 
+    /**
+     * Drops the quiet start of what waits, down to the start cushion: audio queued while a channel sets up would
+     * otherwise be delay for the whole call. Only near-silence before the first sound goes, so an opening "hello"
+     * is kept whole.
+     */
+    public synchronized void dropQuietStart(int quietPeak) {
+        while (ringCount > startSamples) {
+            short sample = ring[ringStart];
+            if (sample >= quietPeak || sample <= -quietPeak) return;
+            ringStart = (ringStart + 1) % ring.length;
+            ringCount--;
+        }
+    }
+
     public synchronized void clear() {
         ringStart = 0;
         ringCount = 0;

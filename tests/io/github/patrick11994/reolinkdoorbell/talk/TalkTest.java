@@ -16,6 +16,7 @@ public final class TalkTest {
         g711MatchesAudioop();
         downsamplerFilters();
         cushionAndCap();
+        quietStartDropped();
         backchannelAgainstFakeDoorbell();
         System.out.println("TalkTest passed");
     }
@@ -81,6 +82,33 @@ public final class TalkTest {
         b.clear();
         b.nextPacket(packet);
         check(packet[0], (short) 0);
+    }
+
+    /** Setup backlog: leading silence goes down to the cushion, the first sound and everything after it stays. */
+    static void quietStartDropped() {
+        TalkQueue q = new TalkQueue(100, 1000);
+        q.write(filled(300, (short) 50), 300);  // quiet
+        q.write(filled(200, (short) -2000), 200);  // "hello"
+        q.dropQuietStart(1000);
+        short[] out = new short[200];
+        q.next(out, 200);
+        check(out[0], (short) -2000);
+        check(out[199], (short) -2000);
+
+        q = new TalkQueue(100, 1000);
+        q.write(filled(300, (short) 50), 300);  // only quiet: kept down to the cushion
+        q.dropQuietStart(1000);
+        q.next(out, 100);
+        check(out[0], (short) 50);
+        q.next(out, 1);
+        check(out[0], (short) 0);  // ran dry: nothing more was kept
+
+        q = new TalkQueue(100, 1000);
+        q.write(filled(300, (short) 3000), 300);  // someone already speaks: nothing goes
+        q.dropQuietStart(1000);
+        q.next(out, 200);
+        q.next(out, 100);
+        check(out[0], (short) 3000);
     }
 
     /** The real doorbell's SDP; the fake answers like it and records the RTP it receives. */
