@@ -578,7 +578,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
      */
     private synchronized void attachVideo(Object owner, Surface surface) {
         log("viewer: surface ready" + (stream == null ? ", no stream" : ""));
-        if (videoRenderer != null) videoRenderer.release();
+        // The old viewer's decoder: released off this (main) thread, which waiting for it would hold up, together
+        // with the new viewer's first picture and every tap. Its surface lives until its own viewer goes.
+        final VideoRenderer old = videoRenderer;
         videoOwner = owner;
         videoRenderer = new VideoRenderer(surface, new VideoRenderer.Listener() {
             @Override public void onVideoSize(int width, int height) {
@@ -604,6 +606,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             }
         });
         if (stream != null) stream.attachVideo(videoRenderer);
+        if (old != null) releaseLater(old::release);
     }
 
     private synchronized void detachVideo(Object owner) {
