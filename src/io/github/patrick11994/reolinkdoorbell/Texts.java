@@ -149,6 +149,7 @@ final class Texts {
     String noVideo() { return get("noVideo"); }
     String videoStopped() { return get("videoStopped"); }
     String videoNotShown() { return get("videoNotShown"); }
+    String videoH265() { return get("videoH265"); }
     String doorbellSoundStopped() { return get("doorbellSoundStopped"); }
     String voiceNotThrough() { return get("voiceNotThrough"); }
     String noMicrophone() { return get("noMicrophone"); }
