@@ -20,7 +20,7 @@ import java.util.regex.Pattern;
 public final class BaichuanClientTest {
     static final String NONCE = "testNonce42";
     public static final String USER = "viewer";
-    static final String PASSWORD = "s3cret";
+    public static final String PASSWORD = "s3cret";
 
     public static void main(String[] args) throws Exception {
         cryptoMatchesReolinkAio();

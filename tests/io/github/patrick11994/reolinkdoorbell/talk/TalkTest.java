@@ -149,7 +149,7 @@ public final class TalkTest {
         }
     }
 
-    private static void fakeRtsp(ServerSocket server, String sdp, List<String> requests, List<byte[]> packets) {
+    public static void fakeRtsp(ServerSocket server, String sdp, List<String> requests, List<byte[]> packets) {
         try (Socket socket = server.accept()) {
             InputStream raw = socket.getInputStream();
             DataInputStream in = new DataInputStream(raw);

@@ -46,7 +46,7 @@
       ]}
   ],
   "buttons": [
-    {"id": "check", "title": "Check the doorbell", "label": "Check", "group": "Doorbell", "description": "Checks the address, username and password, and that button presses, video and talking all work.", "visibleWhen": {"key": "host", "notEmpty": true}}
+    {"id": "check", "title": "Check the doorbell", "label": "Check", "group": "Doorbell", "description": "Checks the address, username and password, that the doorbell reports button presses, that it offers the chosen video stream, and that it accepts talk the way the Talk setting chooses.", "visibleWhen": {"key": "host", "notEmpty": true}}
   ],
   "commands": [
     {"id": "show", "title": "Open"},

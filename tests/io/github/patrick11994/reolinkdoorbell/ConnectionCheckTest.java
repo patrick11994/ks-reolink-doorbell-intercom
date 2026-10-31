@@ -2,27 +2,30 @@
 package io.github.patrick11994.reolinkdoorbell;
 
 import java.net.ServerSocket;
+import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanClientTest;
+import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanTalkTest;
+import io.github.patrick11994.reolinkdoorbell.talk.TalkTest;
 
 public final class ConnectionCheckTest {
     public static void main(String[] args) throws Exception {
         Texts english = Texts.of("English"), dutch = Texts.of("Nederlands");
-        check(ConnectionCheck.run("", 9000, 554, "u", "p", english).message, english.checkNotConfigured());
+        check(ConnectionCheck.run("", 9000, 554, MAIN, "Automatic", "u", "p", english).message, english.checkNotConfigured());
         check(dutch.answer(), "Opnemen");
 
         int closed;
         try (ServerSocket probe = new ServerSocket(0)) {
             closed = probe.getLocalPort();
         }
-        ConnectionCheck.Result unreachable = ConnectionCheck.run("127.0.0.1", closed, closed, "u", "p", english);
+        ConnectionCheck.Result unreachable = ConnectionCheck.run("127.0.0.1", closed, closed, MAIN, "Automatic", "u", "p", english);
         check(unreachable.ok, false);
         check(unreachable.message, english.checkUnreachable("127.0.0.1"));
 
         try (ServerSocket server = new ServerSocket(0)) {
             Thread doorbell = new Thread(() -> BaichuanClientTest.fakeDoorbell(server, "real", new CopyOnWriteArrayList<>()));
             doorbell.start();
-            ConnectionCheck.Result refused = ConnectionCheck.run("127.0.0.1", server.getLocalPort(), closed, BaichuanClientTest.USER, "wrong", english);
+            ConnectionCheck.Result refused = ConnectionCheck.run("127.0.0.1", server.getLocalPort(), closed, MAIN, "Automatic", BaichuanClientTest.USER, "wrong", english);
             check(refused.message, english.checkLoginRefused());
             doorbell.join(3000);
         }
@@ -40,11 +43,26 @@ public final class ConnectionCheckTest {
             });
             doorbell.start();
             camera.start();
-            ConnectionCheck.Result garbled = ConnectionCheck.run("127.0.0.1", server.getLocalPort(), rtsp.getLocalPort(), BaichuanClientTest.USER, "real", english);
+            ConnectionCheck.Result garbled = ConnectionCheck.run("127.0.0.1", server.getLocalPort(), rtsp.getLocalPort(), MAIN, "Automatic", BaichuanClientTest.USER, "real", english);
             check(garbled.message, english.checkNoVideo());
             doorbell.join(3000);
             camera.join(3000);
         }
+        // A whole doorbell: the check follows the chosen stream and the Talk setting.
+        String video = "v=0\r\ns=x\r\nt=0 0\r\nm=video 0 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=recvonly\r\na=control:track1\r\n";
+        String backchannel = video + "m=audio 0 RTP/AVP 0\r\na=control:track3\r\na=rtpmap:0 PCMU/8000\r\na=sendonly\r\n";
+        String noTalk = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<TalkAbility version=\"1.1\">\n</TalkAbility>\n</body>\n";
+        List<String> requests = new CopyOnWriteArrayList<>();
+        check(doorbell(BaichuanTalkTest.ABILITY, video, "/h264Preview_01_sub", "Automatic", requests, english), english.checkOk());
+        check(requests.stream().anyMatch(r -> r.startsWith("DESCRIBE rtsp://127.0.0.1:") && r.contains("/h264Preview_01_sub ")), true);  // the stream the viewer will play
+        // Automatic talks over Baichuan first, so it is probed even when ONVIF talk is there: either one will do.
+        check(doorbell(noTalk, backchannel, MAIN, "Automatic", requests, english), english.checkOk());
+        check(doorbell(noTalk, video, MAIN, "Automatic", requests, english), english.checkNoTalk());
+        // A forced path must work itself.
+        check(doorbell(noTalk, backchannel, MAIN, "Baichuan", requests, english), english.checkNoBaichuanTalk());
+        check(doorbell(BaichuanTalkTest.ABILITY, video, MAIN, "ONVIF", requests, english), english.checkNoTalk());
+        check(doorbell(BaichuanTalkTest.ABILITY, video, MAIN, "Baichuan", requests, english), english.checkOk());
+
         // The event session's reasons, in a few words; anything unknown is a lost connection.
         check(ConnectionCheck.problem("IOException: the doorbell stopped answering", dutch), "reageert niet");
         check(ConnectionCheck.problem("ConnectException: failed to connect to /192.168.1.2 (port 9000) after 5000ms: isConnected failed: EHOSTUNREACH (No route to host)", english), "not reachable");
@@ -52,6 +70,25 @@ public final class ConnectionCheckTest {
         check(ConnectionCheck.problem("the doorbell is set up as a Reolink 'account device', which blocks local login", english), english.problemAccountDevice());
         check(ConnectionCheck.problem("EOFException: the doorbell closed the connection", english), "connection lost");
         System.out.println("ConnectionCheckTest passed");
+    }
+
+    private static final String MAIN = "/h264Preview_01_main";
+
+    /** Runs the check against a fake doorbell: Baichuan logins answering TalkAbility, and RTSP describing sdp. */
+    private static String doorbell(String ability, String sdp, String path, String talkPath, List<String> requests, Texts texts) throws Exception {
+        requests.clear();
+        try (ServerSocket baichuan = new ServerSocket(0); ServerSocket rtsp = new ServerSocket(0)) {
+            Thread logins = new Thread(() -> {
+                for (int i = 0; i < 2; i++) BaichuanTalkTest.fakeTalkDoorbell(baichuan, ability, 0, new CopyOnWriteArrayList<>(), new CopyOnWriteArrayList<>());
+            });
+            Thread camera = new Thread(() -> TalkTest.fakeRtsp(rtsp, sdp, requests, new CopyOnWriteArrayList<>()));
+            logins.setDaemon(true);  // a check that needs one login leaves the second accept waiting until the socket closes
+            logins.start();
+            camera.start();
+            String message = ConnectionCheck.run("127.0.0.1", baichuan.getLocalPort(), rtsp.getLocalPort(), path, talkPath, BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, texts).message;
+            camera.join(3000);
+            return message;
+        }
     }
 
     private static void check(Object actual, Object expected) {

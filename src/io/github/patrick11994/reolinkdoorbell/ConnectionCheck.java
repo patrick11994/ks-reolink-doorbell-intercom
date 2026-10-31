@@ -14,8 +14,8 @@ import io.github.patrick11994.reolinkdoorbell.media.Sdp;
 
 /**
  * The settings page's Check button: the three things a call needs, in order, each with a message a person can act
- * on. Button presses (a Baichuan login on 9000), video (RTSP on 554) and talking (Baichuan talk on 9000, or else the
- * ONVIF backchannel track).
+ * on. Button presses (a Baichuan login on 9000), video (the chosen stream's RTSP description on 554) and talking the
+ * way the Talk setting goes: Baichuan talk on 9000, the ONVIF backchannel track, or for Automatic either of them.
  */
 final class ConnectionCheck {
     static final class Result {
@@ -31,15 +31,15 @@ final class ConnectionCheck {
     private ConnectionCheck() {}
 
     /** Always returns a result, so the settings page never stays on "Checking". */
-    static Result run(String host, int baichuanPort, int rtspPort, String username, String password, Texts texts) {
+    static Result run(String host, int baichuanPort, int rtspPort, String rtspPath, String talkPath, String username, String password, Texts texts) {
         try {
-            return checks(host, baichuanPort, rtspPort, username, password, texts);
+            return checks(host, baichuanPort, rtspPort, rtspPath, talkPath, username, password, texts);
         } catch (RuntimeException error) {
             return new Result(false, texts.checkFailed(describe(error)));
         }
     }
 
-    private static Result checks(String host, int baichuanPort, int rtspPort, String username, String password, Texts texts) {
+    private static Result checks(String host, int baichuanPort, int rtspPort, String rtspPath, String talkPath, String username, String password, Texts texts) {
         if (host.isEmpty() || username.isEmpty() || password.isEmpty()) return new Result(false, texts.checkNotConfigured());
         try {
             BaichuanClient.verify(host, baichuanPort, username, password);
@@ -50,7 +50,7 @@ final class ConnectionCheck {
             return new Result(false, unreachable(error) ? texts.checkUnreachable(host) : texts.checkFailed(describe(error)));
         }
         boolean onvifTalk;
-        RtspSession rtsp = new RtspSession(host, rtspPort, "/h264Preview_01_main", username, password);
+        RtspSession rtsp = new RtspSession(host, rtspPort, rtspPath, username, password);
         try {
             Sdp sdp = rtsp.describe(Collections.singletonMap("Require", "www.onvif.org/ver20/backchannel"));
             if (sdp.receive("video") == null) return new Result(false, texts.checkNoVideo());
@@ -60,7 +60,10 @@ final class ConnectionCheck {
         } finally {
             rtsp.close();
         }
-        if (!onvifTalk && !baichuanTalk(host, baichuanPort, username, password)) return new Result(false, texts.checkNoTalk());
+        // Automatic probes Baichuan even when ONVIF is there: it talks over Baichuan first.
+        boolean talks = talkPath.equals("ONVIF") ? onvifTalk
+            : baichuanTalk(host, baichuanPort, username, password) || (!talkPath.equals("Baichuan") && onvifTalk);
+        if (!talks) return new Result(false, talkPath.equals("Baichuan") ? texts.checkNoBaichuanTalk() : texts.checkNoTalk());
         return new Result(true, texts.checkOk());
     }
 

@@ -482,7 +482,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         Thread thread = new Thread(() -> {
             try {
                 h.setupResult(run, "running", t.checking());
-                ConnectionCheck.Result result = ConnectionCheck.run(s.host, 9000, 554, s.username, s.password, t);
+                ConnectionCheck.Result result = ConnectionCheck.run(s.host, 9000, 554, s.streamPath, s.talkPath, s.username, s.password, t);
                 h.setupResult(run, result.ok ? "success" : "error", result.message);
             } catch (RuntimeException | LinkageError gone) {
                 // The run or the session ended meanwhile.
