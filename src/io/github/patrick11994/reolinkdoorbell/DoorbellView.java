@@ -128,9 +128,10 @@ final class DoorbellView extends FrameLayout {
     private boolean renderPending;  // the buttons changed while Hold to talk was held
     private boolean arrangePending, pendingWide;  // the layout changed while Hold to talk was held
     private long talkDownAt;
-    private boolean talkHint;  // the chip shows how push to talk works, after a tap too short to say anything
+    private boolean chipNote;  // the chip says something else for a while: how push to talk works, or a problem
     private static final long SHORT_TAP_MILLIS = 400;
-    private final Runnable endTalkHint = this::endTalkHint;
+    private final Runnable endChipNote = this::endChipNote;
+    private static final long NOTICE_MILLIS = 6000;
 
     DoorbellView(Context context, KsTheme theme, Texts texts, String name, State state, int volumePercent, Callback callback) {
         super(context);
@@ -592,7 +593,7 @@ final class DoorbellView extends FrameLayout {
     private void render() {
         // Just the name: the chime, the picture and the buttons already say what is going on.
         title.setText(name);
-        if (!talkHint) {
+        if (!chipNote) {
             speaking.setVisibility(speakingVisibility());
             speaking.setText(texts.microphoneActive());
         }
@@ -796,7 +797,7 @@ final class DoorbellView extends FrameLayout {
         talking = now;
         if (now) {
             talkDownAt = System.nanoTime() / 1_000_000;
-            if (talkHint) endTalkHint();
+            if (chipNote) endChipNote();
         }
         if (circle != null) {
             ((GradientDrawable) circle.getBackground()).setColor(now ? Color.WHITE : 0x59FFFFFF);
@@ -827,17 +828,34 @@ final class DoorbellView extends FrameLayout {
 
     /** A tap too short to talk: the chip says, in grey rather than the microphone's red, to hold the button. */
     private void showTalkHint() {
-        removeCallbacks(endTalkHint);
-        talkHint = true;
-        ((GradientDrawable) speaking.getBackground()).setColor(0xE6202124);
-        speaking.setText(texts.holdToTalkHint());
-        speaking.setVisibility(VISIBLE);
-        postDelayed(endTalkHint, FEEDBACK_MILLIS);
+        showChipNote(texts.holdToTalkHint(), FEEDBACK_MILLIS);
     }
 
-    private void endTalkHint() {
-        removeCallbacks(endTalkHint);
-        talkHint = false;
+    /**
+     * Something in the call stopped working while the picture plays on (the microphone, talking, the door's sound):
+     * said for a few seconds in the chip's place, where it does not cover the visitor.
+     */
+    void showNotice(String text) {
+        showChipNote(text, NOTICE_MILLIS);
+        if (!overlay || state == State.RINGING) return;
+        // The overlay hides its controls, the chip among them, during a call: show them for as long as the notice.
+        if (controlsHidden) setControlsHidden(false);
+        removeCallbacks(hideControls);
+        postDelayed(hideControls, NOTICE_MILLIS);
+    }
+
+    private void showChipNote(String text, long millis) {
+        removeCallbacks(endChipNote);
+        chipNote = true;
+        ((GradientDrawable) speaking.getBackground()).setColor(0xE6202124);
+        speaking.setText(text);
+        speaking.setVisibility(VISIBLE);
+        postDelayed(endChipNote, millis);
+    }
+
+    private void endChipNote() {
+        removeCallbacks(endChipNote);
+        chipNote = false;
         ((GradientDrawable) speaking.getBackground()).setColor(safeColor("error", 0xFFB3261E));
         speaking.setText(texts.microphoneActive());
         speaking.setVisibility(speakingVisibility());

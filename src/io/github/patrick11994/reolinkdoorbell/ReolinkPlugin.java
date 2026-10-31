@@ -405,7 +405,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }
         if (speakerOn && audioRenderer == null && stream != null) {
             audioRenderer = new AudioRenderer(message -> {
-                showMessage(message);
+                showNotice(message);
                 log(message);
             });
             applyCallVolume(liveCallVolume, true);
@@ -424,7 +424,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             if (callPushToTalk) log("microphone: push to talk");
             mic = new MicCapture(talk, settings.microphone, settings.micRate, callPushToTalk && !talking, state -> {
                 log("microphone: " + state);
-                if (!state.startsWith("live")) showMessage(texts.noMicrophone());
+                if (!state.startsWith("live")) showNotice(texts.noMicrophone());
             });
         } else if (!micOn && mic != null) {
             releaseLater(mic::release);
@@ -534,7 +534,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 log("talk: falling back to the ONVIF backchannel");
                 fallback[0].primaryRefused();
             } else if (state.startsWith("talk refused") || state.startsWith("talk failed")) {
-                showMessage(state);
+                showNotice(state);
             }
         });
         baichuanTalk = baichuan;
@@ -547,7 +547,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         return new Backchannel(s.host, 554, s.streamPath, s.username, s.password, state -> {
             if (!state.equals("connecting") && !state.equals("open")) log("talk: " + state);
             else if (state.equals("open")) log("talk: open over ONVIF");
-            if (state.startsWith("talk failed")) showMessage(state);
+            if (state.startsWith("talk failed")) showNotice(state);
         });
     }
 
@@ -705,9 +705,16 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }, DUCK_TAIL_MILLIS, TimeUnit.MILLISECONDS);
     }
 
+    /** Why there is no picture, or why it stopped: over the picture area. */
     private void showMessage(String message) {
         DoorbellView v = view;
         if (v != null) v.post(() -> v.setMessage(message));
+    }
+
+    /** A problem with sound or talking: a short notice that leaves the picture free. */
+    private void showNotice(String message) {
+        DoorbellView v = view;
+        if (v != null) v.post(() -> v.showNotice(message));
     }
 
     @Override public void ring() {
