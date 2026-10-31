@@ -190,6 +190,11 @@ final class Texts {
     String enterSettings() { return get("enterSettings"); }
     String connectedTo(String name) { return format("connectedTo", "name", name); }
     String doorbellProblem(String detail) { return format("doorbellProblem", "detail", detail); }
+    String problemNotAnswering() { return get("problemNotAnswering"); }
+    String problemUnreachable() { return get("problemUnreachable"); }
+    String problemLogin() { return get("problemLogin"); }
+    String problemAccountDevice() { return get("problemAccountDevice"); }
+    String problemLost() { return get("problemLost"); }
 
     // Connection check
     String checking() { return get("checking"); }

@@ -237,12 +237,17 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }
         BaichuanClient[] self = new BaichuanClient[1];  // a replaced client can take up to its timeout to stop: ignore it
         BaichuanClient client = new BaichuanClient(s.host, 9000, s.username, s.password, new BaichuanClient.Listener() {
+            private String logged = "";  // each change once: a doorbell that is away fails every few seconds
+
             @Override public void onConnection(boolean connected, String detail) {
                 if (events != self[0]) return;
                 Texts t = texts;
                 boolean connecting = "connecting".equals(detail);
-                publishText("connection", t.connectionReading(), connected ? t.connected() : connecting ? t.connectingState() : detail);
-                status(connected ? t.connectedTo(s.name(t)) : t.doorbellProblem(connecting ? t.connectingState() : detail), !connected && !connecting);
+                if (!connecting && !detail.equals(logged)) log("events: " + detail);
+                if (!connecting) logged = detail;
+                String shown = connected ? t.connected() : connecting ? t.connectingState() : ConnectionCheck.problem(detail, t);
+                publishText("connection", t.connectionReading(), shown);
+                status(connected ? t.connectedTo(s.name(t)) : t.doorbellProblem(shown), !connected && !connecting);
             }
 
             @Override public void onAlarm(AlarmEvents.Event event) {

@@ -45,6 +45,12 @@ public final class ConnectionCheckTest {
             doorbell.join(3000);
             camera.join(3000);
         }
+        // The event session's reasons, in a few words; anything unknown is a lost connection.
+        check(ConnectionCheck.problem("IOException: the doorbell stopped answering", dutch), "reageert niet");
+        check(ConnectionCheck.problem("ConnectException: failed to connect to /192.168.1.2 (port 9000) after 5000ms: isConnected failed: EHOSTUNREACH (No route to host)", english), "not reachable");
+        check(ConnectionCheck.problem("the doorbell refused the username or password", english), english.problemLogin());
+        check(ConnectionCheck.problem("the doorbell is set up as a Reolink 'account device', which blocks local login", english), english.problemAccountDevice());
+        check(ConnectionCheck.problem("EOFException: the doorbell closed the connection", english), "connection lost");
         System.out.println("ConnectionCheckTest passed");
     }
 
