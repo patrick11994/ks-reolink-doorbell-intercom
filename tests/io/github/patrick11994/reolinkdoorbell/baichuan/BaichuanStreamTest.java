@@ -20,6 +20,7 @@ public final class BaichuanStreamTest {
         adtsBecomesTheRtspConfig();
         skipsJunkAndCapsFrames();
         streamsFromAFakeDoorbell();
+        silentAfterPreviewFailsFast();
         System.out.println("BaichuanStreamTest passed");
     }
 
@@ -54,6 +55,34 @@ public final class BaichuanStreamTest {
         p.feed(stream, 0, stream.length);
         check(out.toString(), "[video 9 bytes @7]");
         check(p.skipped() > 0, true);
+    }
+
+    /** A doorbell that logs in but sends no picture after Preview: the stream fails within the keyframe deadline. */
+    static void silentAfterPreviewFailsFast() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread doorbell = new Thread(() -> {
+                try (Socket socket = server.accept()) {
+                    DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+                    if (BaichuanClientTest.fakeLogin(in, socket.getOutputStream(), BaichuanClientTest.PASSWORD, new ArrayList<>()) == null) return;
+                    socket.setSoTimeout(6000);
+                    while (true) BcMessage.read(in);  // reads the Preview, answers nothing
+                } catch (Exception closed) {
+                    // The stream gave up.
+                }
+            });
+            doorbell.start();
+            java.util.concurrent.CompletableFuture<String> failed = new java.util.concurrent.CompletableFuture<>();
+            long started = System.nanoTime();
+            BaichuanStream stream = new BaichuanStream("127.0.0.1", server.getLocalPort(), BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, false,
+                s -> { if (s.startsWith("stream failed")) failed.complete(s); }, 10_000);
+            stream.start();
+            String state = failed.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            long took = (System.nanoTime() - started) / 1_000_000;
+            stream.stop();
+            doorbell.join(3000);
+            check(state.contains("no picture within"), true);
+            check(took < BaichuanStream.FIRST_KEYFRAME_MILLIS + 1500, true);  // not the 10 s socket timeout
+        }
     }
 
     /** The stream's session: Preview with newestIFrame, then frames whose first encryptLen bytes are encrypted. */
