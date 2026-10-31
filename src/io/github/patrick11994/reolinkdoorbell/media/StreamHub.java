@@ -74,6 +74,7 @@ public final class StreamHub implements MediaStream {
             Sdp.Track videoTrack = sdp.receive("video");
             Sdp.Track audioTrack = sdp.receive("audio");
             if (videoTrack == null) throw new java.io.IOException("the doorbell offers no video track");
+            if (videoTrack.codec.equals("H265") || videoTrack.codec.equals("HEVC")) throw new java.io.IOException("the doorbell streams H.265, which the viewer does not decode");
             if (videoTrack.clock > 0) videoClock = videoTrack.clock;
             H264Depacketizer h264 = new H264Depacketizer(this::onAccessUnit);
             int videoChannel = s.setup(videoTrack, 0, Collections.<String, String>emptyMap());

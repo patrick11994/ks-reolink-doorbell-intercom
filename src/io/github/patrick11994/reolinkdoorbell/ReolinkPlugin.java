@@ -530,6 +530,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     /** What the viewer says about a stream state; the protocol's own words only go to the log. */
     private String videoProblem(String state) {
+        if (state.contains("H.265")) return texts.videoH265();
         return state.startsWith("stream ended") ? texts.videoStopped() : texts.noVideo();
     }
 

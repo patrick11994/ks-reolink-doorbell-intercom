@@ -27,6 +27,7 @@ public final class MediaTest {
         h264DropsRunawayFrame();
         rtspRefusesHugeAnswers();
         rtspStallAndSilence();
+        rtspH265IsNamed();
         System.out.println("MediaTest passed");
     }
 
@@ -148,6 +149,36 @@ public final class MediaTest {
         check(sizes.get(0) <= H264Depacketizer.MAX_UNIT, true);
         d.onRtp(rtp(packets + 1, 4600, true, new byte[] {0x41, 2}), 0, 14);  // the next normal frame still comes through
         check(sizes.get(sizes.size() - 1), 6);
+    }
+
+    /** A doorbell set to H.265 is named as such over RTSP too, rather than fed to the H.264 depacketizer. */
+    static void rtspH265IsNamed() {
+        String sdp = DOORBELL_SDP.replace("H264/90000", "H265/90000");
+        try (java.net.ServerSocket server = new java.net.ServerSocket(0)) {
+            Thread fake = new Thread(() -> {
+                try (java.net.Socket socket = server.accept()) {
+                    java.io.BufferedReader requests = new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(), java.nio.charset.StandardCharsets.US_ASCII));
+                    java.io.OutputStream out = socket.getOutputStream();
+                    for (int cseq = 1; cseq <= 2; cseq++) {  // OPTIONS, DESCRIBE
+                        for (String line = requests.readLine(); line != null && !line.isEmpty(); line = requests.readLine()) {}
+                        String body = cseq == 2 ? sdp : "";
+                        out.write(("RTSP/1.0 200 OK\r\nCSeq: " + cseq + "\r\nContent-Length: " + body.length() + "\r\n\r\n" + body).getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                    }
+                    Thread.sleep(1000);
+                } catch (Exception closed) {
+                    // The client gave up, as it should.
+                }
+            });
+            fake.start();
+            java.util.concurrent.CompletableFuture<String> failed = new java.util.concurrent.CompletableFuture<>();
+            StreamHub hub = new StreamHub("127.0.0.1", server.getLocalPort(), "/x", "u", "p", state -> { if (state.startsWith("stream failed")) failed.complete(state); });
+            hub.start();
+            check(failed.get(3, java.util.concurrent.TimeUnit.SECONDS).contains("H.265"), true);
+            hub.stop();
+            fake.join(3000);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
     }
 
     /** A packet that stalls halfway is waited for; a stream that stops altogether ends the session. */
