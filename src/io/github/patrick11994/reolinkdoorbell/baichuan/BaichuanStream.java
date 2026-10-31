@@ -17,6 +17,8 @@ import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
  */
 public final class BaichuanStream implements MediaStream {
     static final int CMD_PREVIEW = 3, CMD_PREVIEW_STOP = 4;
+    /** newestIFrame brings a keyframe in about 0.2 s: one that has not come by now will not, so Automatic falls back. */
+    static final int FIRST_KEYFRAME_MILLIS = 2_000;
     private static final Pattern ENCRYPT_LEN = Pattern.compile("<encryptLen>(\\d+)</encryptLen>");
 
     private final String host, username, password;
@@ -153,8 +155,26 @@ public final class BaichuanStream implements MediaStream {
                 }
             });
             boolean streaming = false;
+            long keyframeBy = System.nanoTime() / 1_000_000 + FIRST_KEYFRAME_MILLIS;
+            boolean waiting = true;
             while (running) {
-                BcMessage m = BcMessage.read(s.in);
+                // Until the first keyframe, the read may only wait as long as the keyframe deadline leaves: a doorbell
+                // that answers other messages, or nothing at all, must not hold the fallback back.
+                if (waiting && hub.firstKeyframeMillis() >= 0) {
+                    waiting = false;
+                    s.socket.setSoTimeout(timeoutMillis);
+                } else if (waiting) {
+                    long left = keyframeBy - System.nanoTime() / 1_000_000;
+                    if (left <= 0) throw new IOException("no picture within " + FIRST_KEYFRAME_MILLIS + " ms");
+                    s.socket.setSoTimeout((int) left);
+                }
+                BcMessage m;
+                try {
+                    m = BcMessage.read(s.in);
+                } catch (java.net.SocketTimeoutException quiet) {
+                    if (waiting) throw new IOException("no picture within " + FIRST_KEYFRAME_MILLIS + " ms");
+                    throw quiet;
+                }
                 if (m.command != CMD_PREVIEW || m.messageId != id) continue;
                 if (m.statusOrEncryption != 200) throw new IOException("the doorbell answered the preview with " + m.statusOrEncryption);
                 if (m.payload.length == 0) continue;
