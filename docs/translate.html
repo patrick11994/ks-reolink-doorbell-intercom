@@ -65,6 +65,7 @@
   .steps li.current span { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   .steps li.done span { border-color: var(--accent); color: var(--accent); }
   .intro { margin: 0 0 12px; }
+  .loading { color: var(--muted); margin: 8px 0; }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; align-items: start; }
   .card { border: 1px solid var(--line); border-radius: 12px; background: var(--field); }
   .card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
@@ -111,7 +112,8 @@
   <section id="step-1">
     <div class="panel">
       <p class="intro">Which language do you want to translate into? Continue one of these, or start a new one.</p>
-      <div class="cards" id="cards">
+      <p id="cards-loading" class="loading" aria-live="polite">Loading the texts…</p>
+      <div class="cards hidden" id="cards">
         <div class="card new" id="new-card">
           <button type="button" class="card-head" id="new-card-head" aria-expanded="false">
             <span class="plus" aria-hidden="true">+</span>
@@ -600,23 +602,40 @@
     return { done, total: keys.length };
   }
 
-  /** One card per language there is a file for, then the new-language card. */
+  /** Drafts in this browser for languages there is no file for yet: code to the saved draft. */
+  function newDrafts() {
+    const out = {};
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || !k.startsWith('translate:') || names[k.slice(10)]) continue;
+        try { out[k.slice(10)] = JSON.parse(localStorage.getItem(k)); } catch (e) { /* a broken draft is left out */ }
+      }
+    } catch (e) { /* no storage: no drafts */ }
+    return out;
+  }
+
+  /** One card per language there is a file for, then one per new language drafted here, then the new-language card. */
   async function cards() {
     const root = $('cards'), last = $('new-card');
     root.querySelectorAll('.card.lang').forEach(c => c.remove());
     await Promise.all(Object.keys(names).filter(c => !fileStats[c]).map(async c => {
       try { fileStats[c] = statsOf(parseLanguage(await fetchText('assets/i18n/' + c + '.properties'))); } catch (e) { fileStats[c] = null; }
     }));
-    for (const [c, n] of Object.entries(names)) {
-      const st = fileStats[c], percent = st ? Math.floor(100 * st.done / st.total) : 0, left = st ? st.total - st.done : 0;
+    const list = Object.entries(names).map(([c, n]) => ({ c, n, st: fileStats[c], open: () => pick(c), chosen: selected === c }));
+    for (const [c, d] of Object.entries(newDrafts())) {
+      list.push({ c, n: (d && d.name) || nativeName(c) || c, st: statsOf((d && d.entries) || {}), open: () => openDraft(c, d), chosen: selected === '__new' && code === c, isNew: true });
+    }
+    for (const { c, n, st, open, chosen, isNew } of list) {
+      const percent = st ? Math.floor(100 * st.done / st.total) : 0, left = st ? st.total - st.done : 0;
       const card = document.createElement('div');
-      card.className = 'card lang' + (selected === c ? ' selected' : '');
+      card.className = 'card lang' + (chosen ? ' selected' : '');
       const head = document.createElement('button');
       head.type = 'button'; head.className = 'card-head';
       const english = displayName(c, 'en');
       const text = document.createElement('span');
       const title = document.createElement('span'); title.className = 'card-name'; title.textContent = n;
-      const sub = document.createElement('span'); sub.className = 'card-sub'; sub.textContent = (english && english !== n ? english + ' · ' : '') + c;
+      const sub = document.createElement('span'); sub.className = 'card-sub'; sub.textContent = (english && english !== n ? english + ' · ' : '') + c + (isNew ? ' · new' : '');
       const bar = document.createElement('div'); bar.className = 'mini-bar';
       const fill = document.createElement('div'); fill.style.width = percent + '%'; bar.append(fill);
       const meta = document.createElement('div'); meta.className = 'card-meta';
@@ -626,10 +645,19 @@
       text.append(title, sub, bar, meta);
       head.append(text);
       head.setAttribute('aria-label', n + ', ' + status.textContent);
-      head.addEventListener('click', () => pick(c));
+      head.addEventListener('click', open);
       card.append(head);
       root.insertBefore(card, last);
     }
+  }
+
+  /** A new language drafted earlier in this browser: back to translating it, with its code and name. */
+  async function openDraft(c, d) {
+    $('new-code').value = c;
+    $('new-name').value = (d && d.name) || nativeName(c);
+    nameTyped = true;
+    await pick('__new');
+    if (code) goto(2);
   }
 
   /** A card was chosen: a language goes straight to translating, the new-language card opens its fields. */
@@ -658,11 +686,14 @@
       const [en, list] = await Promise.all([fetchText('assets/i18n/en.properties'), fetchText('assets/i18n/languages.properties')]);
       english = parseEnglish(en); names = parseNames(list);
     } catch (e) {
+      $('cards-loading').classList.add('hidden');
       showError('Could not load the texts from the repository (' + e.message + '). Try again later.');
       return;
     }
     fillSuggestions();
     await cards();
+    $('cards-loading').classList.add('hidden');
+    $('cards').classList.remove('hidden');
     const wanted = params.get('lang');
     if (wanted && names[wanted]) { await pick(wanted); } else goto(1);
   })();
