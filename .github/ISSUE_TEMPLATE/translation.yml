@@ -1,0 +1,29 @@
+name: Translation
+description: Send a new or improved translation of the plugin's texts.
+title: "Translation: "
+labels: ["translation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for translating! See [Translations](https://github.com/patrick11994/ks-reolink-doorbell-intercom#translations) in the README for how the files work.
+  - type: input
+    id: language
+    attributes:
+      label: Language
+      description: Its name as it should appear in the Language setting, and its code if you know it.
+      placeholder: Deutsch (de)
+    validations:
+      required: true
+  - type: textarea
+    id: file
+    attributes:
+      label: The file
+      description: Attach the translated file here. GitHub does not accept .properties files, so rename it to .txt first, such as de.properties.txt.
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Texts you were unsure about, or anything else I should know.

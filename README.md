@@ -166,13 +166,22 @@ The card's colour follows the state the way Home Assistant does: a light that is
 
 ## Translations
 
-The call screen, the messages, the readings and the Check button's results come in English and Dutch, and more languages are welcome. Every language is one text file in [`assets/i18n`](assets/i18n), so no code is needed:
+The call screen, the messages, the readings and the Check button's results can be translated, and more languages are welcome. Every language is one text file in [`assets/i18n`](assets/i18n), so no code is needed.
 
-1. Copy [`en.properties`](assets/i18n/en.properties) to a file named after the language code, such as `pt-BR.properties` for Brazilian Portuguese or `de.properties` for German.
-2. Translate everything after each `=`. Keep the words in braces, such as `{name}`, exactly as they are: the plugin fills them in.
-3. [Open an issue](https://github.com/patrick11994/ks-reolink-doorbell-intercom/issues/new) with the file attached, and the language's name as it should appear in the **Language** setting, such as *Português (Brasil)*.
+<!-- translations -->
 
-The language is added in the next release. Its tests check that the file only has the plugin's texts and keeps every placeholder.
+| Language | Translated | Out of date | File |
+| --- | --- | --- | --- |
+| Nederlands | 100% (81 of 81) | – | [`nl.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/nl.properties) |
+| Português (Brasil) | 92% (75 of 81) | – | [`pt-BR.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/pt-BR.properties) |
+
+<!-- /translations -->
+
+**To improve a language** in the table: open its file. Each line starting with `# TODO` still needs work: a missing text (remove `# TODO `, then translate after the `=`), or a text whose English changed (fix the line below it, then remove the `# TODO update` line).
+
+**To add a language:** copy [`en.properties`](assets/i18n/en.properties) to a file named after the language code, such as `de.properties` for German, and translate everything after each `=`.
+
+Either way, keep the words in braces, such as `{name}`, exactly as they are: the plugin fills them in. Then [open a translation issue](https://github.com/patrick11994/ks-reolink-doorbell-intercom/issues/new?template=translation.yml) with the file attached. GitHub does not accept `.properties` files, so rename it to `.txt` first, such as `de.properties.txt`. The translation comes in the next release.
 
 Texts a translation leaves out show in English. With **Language** on *Automatic*, the plugin follows the panel's Android language: a file for the language and region first (`pt-BR`), then the language (`pt`), then English. The settings page itself stays in English: Kiosk Satellite shows plugin settings as they are written.
 

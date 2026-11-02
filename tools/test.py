@@ -32,4 +32,6 @@ with tempfile.TemporaryDirectory(prefix='kiosk-plugin-test-') as directory:
 
 subprocess.run([sys.executable, str(root / 'tools/test_android_sdk.py')], check=True)
 subprocess.run([sys.executable, str(root / 'tools/test_plugin_manifest.py')], check=True)
+# The language files follow English, and the README's translation table is current.
+subprocess.run([sys.executable, str(root / 'tools/translations.py'), '--check'], check=True)
 subprocess.run([sys.executable, str(root / 'tools/test_plugin_assets.py')], check=True)
