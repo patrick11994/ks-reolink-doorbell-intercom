@@ -239,6 +239,11 @@ public final class BaichuanClient {
             return client.nextId(channel);
         }
 
+        /** The id for a stream's messages (Preview and its stop): see BaichuanClient.streamId. */
+        synchronized int streamId(int channel, int stream, int handle) {
+            return client.streamId(channel, stream, handle);
+        }
+
         @Override public void close() throws IOException {
             socket.close();
         }
@@ -307,6 +312,17 @@ public final class BaichuanClient {
     private int nextId(int channel) {
         counter = (counter + 1) & 0xFFFFFF;
         return (channel & 0xFF) | (counter << 8);
+    }
+
+    /**
+     * A stream message's id the way Reolink lays it out: channel, stream (0 main, 1 sub), counter, handle, one byte
+     * each. A doorbell reached directly goes by the Preview's streamType, so the counter in the stream byte never
+     * mattered there; an NVR goes by these bytes, and asked for a stream that does not exist it sent sound only (#6).
+     * Learned from reostream's protocol notes and neolink (both AGPL-3.0); no code copied.
+     */
+    private int streamId(int channel, int stream, int handle) {
+        counter = (counter + 1) & 0xFFFFFF;
+        return (channel & 0xFF) | (stream & 0xFF) << 8 | (counter & 0xFF) << 16 | (handle & 0xFF) << 24;
     }
 
     private void closeSocket() {

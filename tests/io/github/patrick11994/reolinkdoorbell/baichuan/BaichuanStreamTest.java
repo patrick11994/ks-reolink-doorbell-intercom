@@ -21,6 +21,8 @@ public final class BaichuanStreamTest {
         skipsJunkAndCapsFrames();
         streamsFromAFakeDoorbell();
         silentAfterPreviewFailsFast();
+        everyLensAndAudioKind();
+        anNvrGoesByTheHeader();
         System.out.println("BaichuanStreamTest passed");
     }
 
@@ -107,7 +109,64 @@ public final class BaichuanStreamTest {
             check(log.contains("state streaming"), true);
             check(seen.toString(), "[video 1004 key @0, video 17 @50000, format 1408 @16000, audio 40 @0, audio 40 @64000]");
             check(log.get(log.size() - 1), "preview stop");
+            // Reolink's layout: channel, stream (0 main), counter, handle. The counter must stay out of the stream byte.
+            check(log.stream().filter(l -> l.startsWith("preview header ")).findFirst().get().matches("preview header channel 0 stream 0 counter \\d+ handle 0"), true);
+            check(log.stream().anyMatch(l -> l.matches("stop header channel 0 stream 0 counter \\d+ handle 0")), true);
         }
+    }
+
+    /** A second lens's video ("10dc") is video, not an info frame; ADPCM ("01wb") is counted and not played. */
+    static void everyLensAndAudioKind() {
+        List<String> out = new ArrayList<>();
+        BcMediaParser p = new BcMediaParser(listener(out));
+        byte[] adpcm = aac(adts(40));
+        System.arraycopy("01wb".getBytes(StandardCharsets.US_ASCII), 0, adpcm, 0, 4);
+        byte[] stream = concat(info(640, 480, 15), video("10dc", annexB(5, 100), 7), adpcm, aac(adts(40)));
+        p.feed(stream, 0, stream.length);
+        check(out.toString(), "[info 640x480@15, video key 104 bytes @7, aac 40 bytes config 1408 @16000]");
+        check(p.summary(), "01wb 1x (56 bytes), 05wb 1x (56 bytes), 1002 1x (32 bytes), 10dc 1x (136 bytes), info 640x480");
+        check(p.skipped(), 0L);
+    }
+
+    /**
+     * A recorder goes by the header's stream byte, not the XML: asked for a stream that does not exist, it sends sound
+     * only, as natebgamer's NVR did (#6). The sub stream asks for stream 1 and gets its picture.
+     */
+    static void anNvrGoesByTheHeader() throws Exception {
+        List<String> seen = new CopyOnWriteArrayList<>();
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread nvr = new Thread(() -> {
+                try (Socket socket = server.accept()) {
+                    socket.setSoTimeout(3000);
+                    DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+                    OutputStream out = socket.getOutputStream();
+                    byte[] key = BaichuanClientTest.fakeLogin(in, out, BaichuanClientTest.PASSWORD, new ArrayList<>());
+                    if (key == null) return;
+                    while (true) {
+                        BcMessage m = BcMessage.read(in);
+                        if (m.command != BaichuanStream.CMD_PREVIEW) continue;
+                        int stream = m.messageId >>> 8 & 0xFF;
+                        for (int i = 0; i < 3; i++) send(out, m.messageId, key, aac(adts(120)), -1);  // the sound comes either way
+                        if (stream == 1) send(out, m.messageId, key, video("00dc", annexB(5, 300), 0), -1);
+                        out.flush();
+                    }
+                } catch (Exception closed) {
+                    // The stream stopped.
+                }
+            });
+            nvr.start();
+            BaichuanStream stream = new BaichuanStream("127.0.0.1", server.getLocalPort(), BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, true, s -> seen.add(s), 2000);
+            stream.attachVideo((au, micros, key) -> seen.add("video" + (key ? " key" : "")));
+            stream.start();
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> seen.contains("video key"), 3000, "the recorder's sub-stream picture");
+            stream.stop();
+            nvr.join(3000);
+        }
+    }
+
+    /** A message id as Reolink lays it out. */
+    private static String header(int id) {
+        return "channel " + (id & 0xFF) + " stream " + (id >>> 8 & 0xFF) + " counter " + (id >>> 16 & 0xFF) + " handle " + (id >>> 24);
     }
 
     static void fakePreviewDoorbell(ServerSocket server, List<String> log) {
@@ -122,6 +181,7 @@ public final class BaichuanStreamTest {
                 String xml = new String(BcCrypto.aes(key, m.body, false), StandardCharsets.UTF_8);
                 if (m.command == BaichuanStream.CMD_PREVIEW) {
                     log.add("preview " + tag(xml, "streamType") + " " + tag(xml, "policy"));
+                    log.add("preview header " + header(m.messageId));
                     // As the doorbell does it: a plain info header, then a keyframe spread over two messages whose first
                     // part is encrypted (encryptLen), then a P-frame and two audio frames in one encrypted message.
                     byte[] key1 = video("00dc", annexB(5, 1000), 3_000_000);
@@ -131,6 +191,7 @@ public final class BaichuanStreamTest {
                     byte[] rest = concat(video("01dc", annexB(1, 13), 3_050_000), aac(adts(40)), aac(adts(40)));
                     send(out, m.messageId, key, rest, rest.length);
                 } else if (m.command == BaichuanStream.CMD_PREVIEW_STOP) {
+                    log.add("stop header " + header(m.messageId));
                     log.add("preview stop");
                 }
                 out.flush();
