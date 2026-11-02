@@ -174,8 +174,8 @@ The call screen, the messages, the readings and the Check button's results can b
 
 | Language | Translated | Out of date | File |
 | --- | --- | --- | --- |
-| Nederlands | 100% (81 of 81) | – | [`nl.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/nl.properties) |
-| Português (Brasil) | 92% (75 of 81) | – | [`pt-BR.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/pt-BR.properties) |
+| Nederlands | 100% (82 of 82) | – | [`nl.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/nl.properties) |
+| Português (Brasil) | 91% (75 of 82) | – | [`pt-BR.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/pt-BR.properties) |
 
 <!-- /translations -->
 

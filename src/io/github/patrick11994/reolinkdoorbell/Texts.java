@@ -211,5 +211,6 @@ final class Texts {
     String checkVideoTooLarge(String size) { return format("checkVideoTooLarge", "size", size); }
     String checkNoBaichuanVideo() { return get("checkNoBaichuanVideo"); }
     String checkVideoOverRtsp() { return get("checkVideoOverRtsp"); }
+    String checkBadChannel() { return get("checkBadChannel"); }
     String checkFailed(String detail) { return format("checkFailed", "detail", detail); }
 }
