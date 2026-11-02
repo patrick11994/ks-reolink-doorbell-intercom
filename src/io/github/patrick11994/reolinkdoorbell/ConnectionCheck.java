@@ -11,11 +11,14 @@ import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanClient;
 import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanTalk;
 import io.github.patrick11994.reolinkdoorbell.media.RtspSession;
 import io.github.patrick11994.reolinkdoorbell.media.Sdp;
+import io.github.patrick11994.reolinkdoorbell.media.SpsInfo;
 
 /**
  * The settings page's Check button: the three things a call needs, in order, each with a message a person can act
  * on. Button presses (a Baichuan login on 9000), video (the chosen stream's RTSP description on 554) and talking the
  * way the Talk setting goes: Baichuan talk on 9000, the ONVIF backchannel track, or for Automatic either of them.
+ * Last, whether this panel can play that stream's picture size: some, such as the Echo Show 8, cannot play the main
+ * stream. The check says so instead of the viewer switching streams behind the user's back.
  */
 final class ConnectionCheck {
     static final class Result {
@@ -28,18 +31,24 @@ final class ConnectionCheck {
         }
     }
 
+    /** The panel's video decoder, as a seam for tests. */
+    interface Player {
+        /** Whether the decoder a call uses can show a picture of this size; true when it cannot tell. */
+        boolean canPlay(int width, int height);
+    }
+
     private ConnectionCheck() {}
 
     /** Always returns a result, so the settings page never stays on "Checking". */
-    static Result run(String host, int baichuanPort, int rtspPort, String rtspPath, String talkPath, String username, String password, Texts texts) {
+    static Result run(String host, int baichuanPort, int rtspPort, String rtspPath, String talkPath, String username, String password, Player player, Texts texts) {
         try {
-            return checks(host, baichuanPort, rtspPort, rtspPath, talkPath, username, password, texts);
+            return checks(host, baichuanPort, rtspPort, rtspPath, talkPath, username, password, player, texts);
         } catch (RuntimeException error) {
             return new Result(false, texts.checkFailed(describe(error)));
         }
     }
 
-    private static Result checks(String host, int baichuanPort, int rtspPort, String rtspPath, String talkPath, String username, String password, Texts texts) {
+    private static Result checks(String host, int baichuanPort, int rtspPort, String rtspPath, String talkPath, String username, String password, Player player, Texts texts) {
         if (host.isEmpty() || username.isEmpty() || password.isEmpty()) return new Result(false, texts.checkNotConfigured());
         try {
             BaichuanClient.verify(host, baichuanPort, username, password);
@@ -50,10 +59,15 @@ final class ConnectionCheck {
             return new Result(false, unreachable(error) ? texts.checkUnreachable(host) : texts.checkFailed(describe(error)));
         }
         boolean onvifTalk;
+        SpsInfo size = null;  // the stream's picture size, from the SPS in its description
         RtspSession rtsp = new RtspSession(host, rtspPort, rtspPath, username, password);
         try {
             Sdp sdp = rtsp.describe(Collections.singletonMap("Require", "www.onvif.org/ver20/backchannel"));
-            if (sdp.receive("video") == null) return new Result(false, texts.checkNoVideo());
+            Sdp.Track video = sdp.receive("video");
+            if (video == null) return new Result(false, texts.checkNoVideo());
+            for (byte[] set : video.parameterSets()) {
+                if (size == null && set.length > 0 && (set[0] & 0x1F) == 7) size = SpsInfo.parse(set);
+            }
             onvifTalk = sdp.backchannel() != null;
         } catch (IOException error) {
             return new Result(false, texts.checkNoVideo());
@@ -64,6 +78,10 @@ final class ConnectionCheck {
         boolean talks = talkPath.equals("ONVIF") ? onvifTalk
             : baichuanTalk(host, baichuanPort, username, password) || (!talkPath.equals("Baichuan") && onvifTalk);
         if (!talks) return new Result(false, talkPath.equals("Baichuan") ? texts.checkNoBaichuanTalk() : texts.checkNoTalk());
+        if (size != null && !player.canPlay(size.width, size.height)) {
+            String shown = size.width + "x" + size.height;
+            return new Result(false, rtspPath.endsWith("_main") ? texts.checkMainTooLarge(shown) : texts.checkVideoTooLarge(shown));
+        }
         return new Result(true, texts.checkOk());
     }
 
