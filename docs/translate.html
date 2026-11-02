@@ -52,6 +52,9 @@
   .actions .inner { max-width: 980px; margin: 0 auto; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .actions .status { flex: 1 1 200px; font-size: .875rem; color: var(--muted); }
   .error { color: var(--bad); }
+  .code-hint { margin: 10px 0 0; font-size: .9rem; }
+  .code-hint.bad { color: var(--bad); }
+  .code-hint.good { color: var(--ok); }
   .hidden { display: none !important; }
   @media (max-width: 680px) { .row { grid-template-columns: 1fr; } }
 </style>
@@ -66,14 +69,16 @@
       <label>Language
         <select id="language"></select>
       </label>
-      <label id="new-code-field" class="hidden">Language code
-        <input id="new-code" placeholder="de, or pt-BR" size="10" autocomplete="off">
+      <label id="new-code-field" class="hidden">Which language
+        <input id="new-code" list="known-languages" placeholder="Search, or a code such as de" size="24" autocomplete="off" spellcheck="false">
+        <datalist id="known-languages"></datalist>
       </label>
       <label id="new-name-field" class="hidden">Its name, in that language
         <input id="new-name" placeholder="Deutsch" size="18" autocomplete="off">
       </label>
       <button id="discard" class="small hidden" type="button">Start over</button>
     </div>
+    <p id="code-hint" class="code-hint hidden" aria-live="polite"></p>
     <div class="progress">
       <div class="bar" role="progressbar" aria-label="Translated" aria-valuemin="0" aria-valuemax="100"><div id="bar"></div></div>
       <div class="progress-text"><span id="progress"></span><span id="draft-note"></span></div>
@@ -294,8 +299,84 @@
 
   function ready() {
     if (!code) { $('action-status').textContent = 'Choose a language first.'; return false; }
-    if (!/^[a-z]{2,3}(-[A-Z]{2})?$/.test(code)) { $('action-status').textContent = 'The language code looks like de, or pt-BR for a region.'; return false; }
     return true;
+  }
+
+  // Languages to suggest for a new translation: each shows its name in English and in itself.
+  const SUGGESTED = ['ar', 'bg', 'ca', 'cs', 'da', 'de', 'el', 'es', 'es-MX', 'et', 'fi', 'fr', 'fr-CA', 'he', 'hi', 'hr', 'hu', 'id', 'is', 'it',
+    'ja', 'ko', 'lt', 'lv', 'ms', 'nb', 'nl-BE', 'pl', 'pt', 'pt-PT', 'ro', 'ru', 'sk', 'sl', 'sr', 'sv', 'th', 'tr', 'uk', 'vi', 'zh-CN', 'zh-TW'];
+
+  function displayName(tag, inLanguage) {
+    try { return new Intl.DisplayNames([inLanguage], { type: 'language', fallback: 'none' }).of(tag) || null; } catch (e) { return null; }
+  }
+
+  function nativeName(tag) {
+    const n = displayName(tag, tag);
+    return n ? n.charAt(0).toLocaleUpperCase(tag) + n.slice(1) : '';
+  }
+
+  /** The code as Android names a locale (pt_br becomes pt-BR), and what is wrong with it, if anything. */
+  function checkCode(raw) {
+    const parts = raw.trim().replace(/_/g, '-').split('-').filter(Boolean);
+    if (!parts.length) return { error: '' };
+    const tag = parts[0].toLowerCase() + (parts[1] ? '-' + parts[1].toUpperCase() : '');
+    if (parts.length > 2 || !/^[a-z]{2,3}(-[A-Z]{2})?$/.test(tag)) {
+      return { error: 'Use a language code, such as de for German, or one with a country, such as pt-BR for Portuguese in Brazil.' };
+    }
+    const english = displayName(tag, 'en');
+    if (!english) return { error: tag + ' is not a language code this browser knows. Pick one from the list, or check the code.' };
+    if (tag === 'en' || tag.startsWith('en-')) return { error: 'English is the original: pick another language.' };
+    if (names[tag]) return { tag, existing: true, english };
+    return { tag, english };
+  }
+
+  let nameTyped = false;  // the translator wrote the name themselves: no longer filled in from the code
+
+  function newLanguage() {
+    const result = checkCode($('new-code').value);
+    const hint = $('code-hint');
+    hint.textContent = '';
+    hint.className = 'code-hint';
+    code = ''; entries = {};
+    if (result.error !== undefined) {
+      hint.textContent = result.error;
+      hint.classList.add('bad');
+      hint.classList.toggle('hidden', !result.error);
+      render();
+      return;
+    }
+    hint.classList.remove('hidden');
+    if (result.existing) {
+      hint.append(names[result.tag] + ' already has a translation. ');
+      const open = document.createElement('button');
+      open.type = 'button'; open.className = 'small'; open.textContent = 'Open it';
+      open.addEventListener('click', () => { $('language').value = result.tag; choose(result.tag); });
+      hint.append(open);
+      render();
+      return;
+    }
+    const native = nativeName(result.tag);
+    hint.textContent = result.english + (native && native.toLowerCase() !== result.english.toLowerCase() ? ', ' + native : '') + ' (' + result.tag + ')';
+    hint.classList.add('good');
+    if (!nameTyped && native) $('new-name').value = native;
+    code = result.tag;
+    name = $('new-name').value.trim();
+    loadDraft(true);
+    render();
+  }
+
+  function fillSuggestions() {
+    const list = $('known-languages');
+    for (const tag of SUGGESTED) {
+      if (names[tag]) continue;
+      const english = displayName(tag, 'en');
+      if (!english) continue;
+      const native = nativeName(tag);
+      const o = document.createElement('option');
+      o.value = tag;
+      o.label = english + (native && native.toLowerCase() !== english.toLowerCase() ? ' — ' + native : '');
+      list.append(o);
+    }
   }
 
   $('download').addEventListener('click', () => {
@@ -324,12 +405,18 @@
     const isNew = value === '__new';
     $('new-code-field').classList.toggle('hidden', !isNew);
     $('new-name-field').classList.toggle('hidden', !isNew);
-    if (isNew) { code = $('new-code').value.trim(); name = $('new-name').value.trim(); entries = {}; }
-    else {
-      code = value; name = names[value] || value;
-      try { entries = parseLanguage(await fetchText('assets/i18n/' + code + '.properties')); }
-      catch (e) { entries = {}; showError('Could not load ' + code + '.properties (' + e.message + ').'); }
-    }
+    $('code-hint').classList.add('hidden');
+    if (isNew) { newLanguage(); return; }
+    code = value; name = names[value] || value; entries = {};
+    if (!code) { $('draft-note').textContent = ''; $('discard').classList.add('hidden'); render(); return; }  // Choose…
+    try { entries = parseLanguage(await fetchText('assets/i18n/' + code + '.properties')); }
+    catch (e) { entries = {}; showError('Could not load ' + code + '.properties (' + e.message + ').'); }
+    loadDraft(false);
+    render();
+  }
+
+  /** Brings back this browser's earlier work on the current language, if there is any. */
+  function loadDraft(isNew) {
     const draft = code ? store.get('translate:' + code) : null;
     if (draft) {
       try {
@@ -339,21 +426,20 @@
           const base = entries[k];
           entries[k] = { value: v.value, outdated: base ? base.outdated : false, was: base ? base.was : null, reviewed: !!v.reviewed };
         }
-        if (isNew && saved.name) { name = saved.name; $('new-name').value = saved.name; }
+        if (isNew && saved.name) { name = saved.name; $('new-name').value = saved.name; nameTyped = true; }
         $('draft-note').textContent = 'Your earlier work in this browser is back';
       } catch (e) { /* a broken draft: start from the repository */ }
     } else {
       $('draft-note').textContent = '';
     }
     $('discard').classList.toggle('hidden', !draft);
-    render();
   }
 
   function showError(text) { const p = $('load-error'); p.textContent = text; p.classList.remove('hidden'); }
 
   $('language').addEventListener('change', e => choose(e.target.value));
-  $('new-code').addEventListener('change', () => choose('__new'));
-  $('new-name').addEventListener('input', () => { name = $('new-name').value.trim(); saveDraft(); });
+  $('new-code').addEventListener('input', newLanguage);
+  $('new-name').addEventListener('input', () => { nameTyped = true; name = $('new-name').value.trim(); saveDraft(); });
   $('discard').addEventListener('click', () => { store.remove('translate:' + code); choose($('language').value); });
   document.querySelectorAll('input[name="show"]').forEach(r => r.addEventListener('change', render));
 
@@ -369,6 +455,7 @@
     const pick = document.createElement('option'); pick.value = ''; pick.textContent = 'Choose…'; select.append(pick);
     for (const [c, n] of Object.entries(names)) { const o = document.createElement('option'); o.value = c; o.textContent = n; select.append(o); }
     const fresh = document.createElement('option'); fresh.value = '__new'; fresh.textContent = 'A new language…'; select.append(fresh);
+    fillSuggestions();
     const wanted = params.get('lang');
     if (wanted && names[wanted]) { select.value = wanted; choose(wanted); } else render();
   })();
