@@ -50,6 +50,24 @@ public final class SettingsTest {
             }
         }
         if (!seen.equals(parsed.keySet())) throw new AssertionError("not choices in the manifest: " + parsed.keySet() + " vs " + seen);
+
+        // Channel counts from 1 as the Reolink app does; inside, from 0. RTSP paths count from 01, and 1 is a doorbell
+        // reached directly, so nothing changes for one.
+        Map<String, Object> values = new HashMap<>();
+        check(new ReolinkPlugin.Settings(values).channel, 0);
+        check(new ReolinkPlugin.Settings(values).streamPath, "/h264Preview_01_main");
+        values.put("channel", 3);
+        values.put("stream", "Sub (light)");
+        check(new ReolinkPlugin.Settings(values).channel, 2);
+        check(new ReolinkPlugin.Settings(values).streamPath, "/h264Preview_03_sub");
+        values.put("channel", 12.0);  // the settings page may hand a number over as a double
+        check(new ReolinkPlugin.Settings(values).streamPath, "/h264Preview_12_sub");
+        values.put("channel", 0);
+        check(new ReolinkPlugin.Settings(values).channel, 0);
         System.out.println("SettingsTest passed (" + seen.size() + " choices)");
+    }
+
+    private static void check(Object actual, Object expected) {
+        if (!expected.equals(actual)) throw new AssertionError("expected " + expected + " but got " + actual);
     }
 }

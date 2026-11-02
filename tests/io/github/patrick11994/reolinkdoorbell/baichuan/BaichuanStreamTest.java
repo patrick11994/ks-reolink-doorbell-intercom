@@ -24,6 +24,7 @@ public final class BaichuanStreamTest {
         everyLensAndAudioKind();
         anNvrGoesByTheHeader();
         anNvrSplitsFramesOverMessages();
+        aChannelBehindAnNvr();
         System.out.println("BaichuanStreamTest passed");
     }
 
@@ -201,6 +202,41 @@ public final class BaichuanStreamTest {
             check(seen.contains("video 3004 key"), true);
             stream.stop();
             nvr.join(3000);
+        }
+    }
+
+    /** Behind an NVR the Preview and its stop name the doorbell's channel, in the XML and in the header. */
+    static void aChannelBehindAnNvr() throws Exception {
+        List<String> log = new CopyOnWriteArrayList<>();
+        List<String> seen = new CopyOnWriteArrayList<>();
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread nvr = new Thread(() -> {
+                try (Socket socket = server.accept()) {
+                    socket.setSoTimeout(3000);
+                    DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+                    OutputStream out = socket.getOutputStream();
+                    byte[] key = BaichuanClientTest.fakeLogin(in, out, BaichuanClientTest.PASSWORD, new ArrayList<>());
+                    if (key == null) return;
+                    while (true) {
+                        BcMessage m = BcMessage.read(in);
+                        String xml = new String(BcCrypto.aes(key, m.body, false), StandardCharsets.UTF_8);
+                        log.add(m.command + " channelId " + tag(xml, "channelId") + " " + header(m.messageId).replaceAll(" counter \\d+", ""));
+                        if (m.command == BaichuanStream.CMD_PREVIEW) send(out, m.messageId, key, video("00dc", annexB(5, 100), 0), -1);
+                        out.flush();
+                    }
+                } catch (Exception closed) {
+                    // The stream stopped.
+                }
+            });
+            nvr.start();
+            BaichuanStream stream = new BaichuanStream("127.0.0.1", server.getLocalPort(), BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, 2, true, s -> {}, 2000);
+            stream.attachVideo((au, micros, key) -> seen.add("video"));
+            stream.start();
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> seen.contains("video"), 3000, "a picture from channel 3");
+            stream.stop();
+            nvr.join(3000);
+            check(log.contains(BaichuanStream.CMD_PREVIEW + " channelId 2 channel 2 stream 1 handle 0"), true);
+            check(log.contains(BaichuanStream.CMD_PREVIEW_STOP + " channelId 2 channel 2 stream 1 handle 0"), true);
         }
     }
 

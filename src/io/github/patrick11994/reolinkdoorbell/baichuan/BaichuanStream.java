@@ -27,6 +27,7 @@ public final class BaichuanStream implements MediaStream {
     private final Listener listener;
     private final int timeoutMillis;
     private final FrameHub hub = new FrameHub();
+    private final int channel;
     private volatile boolean running;
     private boolean stopped;  // guarded by this
     private BaichuanClient.Login session;
@@ -36,10 +37,20 @@ public final class BaichuanStream implements MediaStream {
     private boolean audioAnnounced;
 
     public BaichuanStream(String host, int port, String username, String password, boolean subStream, Listener listener) {
-        this(host, port, username, password, subStream, listener, 5_000);
+        this(host, port, username, password, 0, subStream, listener, 5_000);
+    }
+
+    /** channel: 0 for a doorbell reached directly; behind an NVR, its channel there, counted from 0. */
+    public BaichuanStream(String host, int port, String username, String password, int channel, boolean subStream, Listener listener) {
+        this(host, port, username, password, channel, subStream, listener, 5_000);
     }
 
     BaichuanStream(String host, int port, String username, String password, boolean subStream, Listener listener, int timeoutMillis) {
+        this(host, port, username, password, 0, subStream, listener, timeoutMillis);
+    }
+
+    BaichuanStream(String host, int port, String username, String password, int channel, boolean subStream, Listener listener, int timeoutMillis) {
+        this.channel = channel;
         this.host = host;
         this.port = port;
         this.username = username;
@@ -71,7 +82,7 @@ public final class BaichuanStream implements MediaStream {
         }
         hub.stop();
         if (s != null) {
-            sendStop(s, subStream ? 1 : 0);  // the stop thread may talk to the network: plugins stop media off the main thread
+            sendStop(s, channel, subStream ? 1 : 0);  // the stop thread may talk to the network: plugins stop media off the main thread
             try {
                 s.close();  // ends the reader thread's blocking read
             } catch (IOException ignored) {
@@ -101,13 +112,13 @@ public final class BaichuanStream implements MediaStream {
     }
 
     /** Tells the doorbell to stop the preview, once per session; a session already gone is fine. */
-    private static void sendStop(BaichuanClient.Login s, int stream) {
-        String stop = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<Preview version=\"1.1\">\n<channelId>0</channelId>\n<handle>0</handle>\n</Preview>\n</body>\n";
+    private static void sendStop(BaichuanClient.Login s, int channel, int stream) {
+        String stop = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<Preview version=\"1.1\">\n<channelId>" + channel + "</channelId>\n<handle>0</handle>\n</Preview>\n</body>\n";
         synchronized (s.out) {
             if (s.socket.isClosed() || s.stopSent) return;
             s.stopSent = true;
             try {
-                s.out.write(BcMessage.encodeModern(CMD_PREVIEW_STOP, s.streamId(0, stream, 0), new byte[0], BcCrypto.aes(s.aesKey(), stop.getBytes(StandardCharsets.UTF_8), true)));
+                s.out.write(BcMessage.encodeModern(CMD_PREVIEW_STOP, s.streamId(channel, stream, 0), new byte[0], BcCrypto.aes(s.aesKey(), stop.getBytes(StandardCharsets.UTF_8), true)));
                 s.out.flush();
             } catch (IOException | RuntimeException ignored) {
                 // The session is gone anyway.
@@ -167,9 +178,9 @@ public final class BaichuanStream implements MediaStream {
                 }
                 session = s;
             }
-            String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<Preview version=\"1.1\">\n<channelId>0</channelId>\n<handle>0</handle>\n"
+            String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<Preview version=\"1.1\">\n<channelId>" + channel + "</channelId>\n<handle>0</handle>\n"
                 + "<streamType>" + (subStream ? "subStream" : "mainStream") + "</streamType>\n<policy>newestIFrame</policy>\n</Preview>\n</body>\n";
-            int id = s.streamId(0, subStream ? 1 : 0, 0);
+            int id = s.streamId(channel, subStream ? 1 : 0, 0);
             synchronized (s.out) {
                 s.out.write(BcMessage.encodeModern(CMD_PREVIEW, id, new byte[0], BcCrypto.aes(s.aesKey(), xml.getBytes(StandardCharsets.UTF_8), true)));
                 s.out.flush();
@@ -260,7 +271,7 @@ public final class BaichuanStream implements MediaStream {
                 + (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()));
         } finally {
             if (s != null) {
-                sendStop(s, subStream ? 1 : 0);
+                sendStop(s, channel, subStream ? 1 : 0);
                 try {
                     s.close();
                 } catch (IOException ignored) {
