@@ -10,7 +10,9 @@ import java.nio.ByteOrder;
  *   "1001"/"1002": a 32-byte info header (width, height, frames per second);
  *   "00dc"/"90dc": an H.264 keyframe, "01dc"/"91dc": any other frame: magic, codec ("H264"), payload size, extra
  *     header size, microseconds, unknown; then the extra header, the Annex-B payload and padding to 8 bytes;
- *   "05wb": AAC as ADTS: magic, size, size, the data, padding to 8. The ADTS header is removed here.
+ *   "05wb": AAC as ADTS: magic, size, size, the data, padding to 8. The ADTS header is removed here;
+ *   "01wb": IMA ADPCM, laid out the same; recognised and counted, not played (the doorbell sends AAC).
+ * The first digit of a "dc" or "wb" magic is the lens, 0 to 9: a dual-lens camera sends "10dc" for its second.
  * Layout first learned from neolink (AGPL-3.0); no code copied. A frame larger than MAX_FRAME, or bytes that are no
  * frame, make it skip ahead to the next magic, so a broken stream cannot make the process allocate without bound.
  */
@@ -29,9 +31,25 @@ public final class BcMediaParser {
     private byte[] buf = new byte[64 * 1024];
     private int length;
     private long skipped;
+    // Packets and bytes per magic, for the log when no picture comes (#6): an NVR sent sound only.
+    private final java.util.Map<String, long[]> seen = new java.util.TreeMap<>();
+    private int infoWidth = -1, infoHeight = -1;
 
     public BcMediaParser(Listener listener) {
         this.listener = listener;
+    }
+
+    /** What the stream brought so far: packets and bytes per magic, the info frame's size and skipped bytes. */
+    public String summary() {
+        StringBuilder out = new StringBuilder();
+        for (java.util.Map.Entry<String, long[]> kind : seen.entrySet()) {
+            out.append(out.length() == 0 ? "" : ", ").append(kind.getKey()).append(' ').append(kind.getValue()[0]).append('x')
+                .append(" (").append(kind.getValue()[1]).append(" bytes)");
+        }
+        if (out.length() == 0) out.append("no packets");
+        if (infoWidth >= 0) out.append(", info ").append(infoWidth).append('x').append(infoHeight);
+        if (skipped > 0) out.append(", ").append(skipped).append(" bytes skipped");
+        return out.toString();
     }
 
     /** Bytes skipped while looking for a frame: zero on a healthy stream. */
@@ -82,13 +100,13 @@ public final class BcMediaParser {
         ByteBuffer b = ByteBuffer.wrap(buf, 0, length).order(ByteOrder.LITTLE_ENDIAN);
         byte m0 = buf[at], m1 = buf[at + 1], m2 = buf[at + 2], m3 = buf[at + 3];
         if (m0 == '1' && m1 == '0' && m2 == '0' && (m3 == '1' || m3 == '2')) return 32;
-        if ((m0 == '0' || m0 == '9') && (m1 == '0' || m1 == '1') && m2 == 'd' && m3 == 'c') {
+        if (m0 >= '0' && m0 <= '9' && (m1 == '0' || m1 == '1') && m2 == 'd' && m3 == 'c') {
             if (length - at < 24) return 0;
             long size = b.getInt(at + 8) & 0xFFFFFFFFL, extra = b.getInt(at + 12) & 0xFFFFFFFFL;
             if (size > MAX_FRAME || extra > 1024) return -1;
             return (int) (24 + extra + size + pad(size));
         }
-        if (m0 == '0' && m1 == '5' && m2 == 'w' && m3 == 'b') {
+        if (m0 >= '0' && m0 <= '9' && (m1 == '5' || m1 == '1') && m2 == 'w' && m3 == 'b') {
             int size = b.getShort(at + 4) & 0xFFFF;
             return 8 + size + (int) pad(size);
         }
@@ -97,20 +115,25 @@ public final class BcMediaParser {
 
     private void emit(int at, int used) {
         ByteBuffer b = ByteBuffer.wrap(buf, at, used).order(ByteOrder.LITTLE_ENDIAN);
-        byte m0 = buf[at], m1 = buf[at + 1];
-        if (m0 == '1') {
-            listener.onInfo(b.getInt(at + 8), b.getInt(at + 12), buf[at + 17] & 0xFF);
-        } else if (buf[at + 2] == 'd') {
+        byte m1 = buf[at + 1], m2 = buf[at + 2];
+        long[] count = seen.computeIfAbsent(new String(buf, at, 4, java.nio.charset.StandardCharsets.US_ASCII), k -> new long[2]);
+        count[0]++;
+        count[1] += used;
+        if (m2 == '0') {  // "1001" or "1002": the only magics with a digit there
+            infoWidth = b.getInt(at + 8);
+            infoHeight = b.getInt(at + 12);
+            listener.onInfo(infoWidth, infoHeight, buf[at + 17] & 0xFF);
+        } else if (m2 == 'd') {
             boolean h265 = buf[at + 4] == 'H' && buf[at + 5] == '2' && buf[at + 6] == '6' && buf[at + 7] == '5';
             int size = b.getInt(at + 8), extra = b.getInt(at + 12);
             long micros = b.getInt(at + 16) & 0xFFFFFFFFL;
             byte[] annexB = new byte[size];
             System.arraycopy(buf, at + 24 + extra, annexB, 0, size);
             listener.onVideo(annexB, micros, m1 == '0', h265);
-        } else {
+        } else if (m1 == '5') {
             int size = b.getShort(at + 4) & 0xFFFF;
             aac(at + 8, size);
-        }
+        }  // "x1wb": ADPCM, counted above only
     }
 
     /** Splits an ADTS frame into its AudioSpecificConfig and the raw frame. */

@@ -71,7 +71,7 @@ public final class BaichuanStream implements MediaStream {
         }
         hub.stop();
         if (s != null) {
-            sendStop(s);  // the stop thread may talk to the network: plugins stop media off the main thread
+            sendStop(s, subStream ? 1 : 0);  // the stop thread may talk to the network: plugins stop media off the main thread
             try {
                 s.close();  // ends the reader thread's blocking read
             } catch (IOException ignored) {
@@ -101,13 +101,13 @@ public final class BaichuanStream implements MediaStream {
     }
 
     /** Tells the doorbell to stop the preview, once per session; a session already gone is fine. */
-    private static void sendStop(BaichuanClient.Login s) {
+    private static void sendStop(BaichuanClient.Login s, int stream) {
         String stop = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<Preview version=\"1.1\">\n<channelId>0</channelId>\n<handle>0</handle>\n</Preview>\n</body>\n";
         synchronized (s.out) {
             if (s.socket.isClosed() || s.stopSent) return;
             s.stopSent = true;
             try {
-                s.out.write(BcMessage.encodeModern(CMD_PREVIEW_STOP, s.nextId(0), new byte[0], BcCrypto.aes(s.aesKey(), stop.getBytes(StandardCharsets.UTF_8), true)));
+                s.out.write(BcMessage.encodeModern(CMD_PREVIEW_STOP, s.streamId(0, stream, 0), new byte[0], BcCrypto.aes(s.aesKey(), stop.getBytes(StandardCharsets.UTF_8), true)));
                 s.out.flush();
             } catch (IOException | RuntimeException ignored) {
                 // The session is gone anyway.
@@ -120,10 +120,17 @@ public final class BaichuanStream implements MediaStream {
      * this tells an answer that never came from video that came under another message id or without a keyframe.
      */
     private static final class Waited {
+        private final int request;
+        private final BcMediaParser parser;
         private int answers;
         private long videoBytes;
         private int others;
         private final StringBuilder kinds = new StringBuilder();
+
+        Waited(int request, BcMediaParser parser) {
+            this.request = request;
+            this.parser = parser;
+        }
 
         void answer(BcMessage m) {
             answers++;
@@ -136,8 +143,13 @@ public final class BaichuanStream implements MediaStream {
         }
 
         @Override public String toString() {
-            return answers + " answers to the preview with " + videoBytes + " bytes of video, " + others + " other messages"
-                + (kinds.length() == 0 ? "" : ": " + kinds + (others > 5 ? ", …" : ""));
+            return answers + " answers to the preview " + idBytes(request) + " with " + videoBytes + " bytes: " + parser.summary() + "; "
+                + others + " other messages" + (kinds.length() == 0 ? "" : ": " + kinds + (others > 5 ? ", …" : ""));
+        }
+
+        /** The id as its four header bytes: channel, stream, counter, handle. */
+        private static String idBytes(int id) {
+            return String.format(java.util.Locale.ROOT, "[%d %d %d %d]", id & 0xFF, id >>> 8 & 0xFF, id >>> 16 & 0xFF, id >>> 24);
         }
     }
 
@@ -155,7 +167,7 @@ public final class BaichuanStream implements MediaStream {
             }
             String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<Preview version=\"1.1\">\n<channelId>0</channelId>\n<handle>0</handle>\n"
                 + "<streamType>" + (subStream ? "subStream" : "mainStream") + "</streamType>\n<policy>newestIFrame</policy>\n</Preview>\n</body>\n";
-            int id = s.nextId(0);
+            int id = s.streamId(0, subStream ? 1 : 0, 0);
             synchronized (s.out) {
                 s.out.write(BcMessage.encodeModern(CMD_PREVIEW, id, new byte[0], BcCrypto.aes(s.aesKey(), xml.getBytes(StandardCharsets.UTF_8), true)));
                 s.out.flush();
@@ -181,7 +193,7 @@ public final class BaichuanStream implements MediaStream {
                 }
             });
             boolean streaming = false;
-            Waited waited = new Waited();  // what came in before the first picture, for the log when none does
+            Waited waited = new Waited(id, parser);  // what came in before the first picture, for the log when none does
             long keyframeBy = System.nanoTime() / 1_000_000 + FIRST_KEYFRAME_MILLIS;
             boolean waiting = true;
             while (running) {
@@ -228,7 +240,7 @@ public final class BaichuanStream implements MediaStream {
                 + (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()));
         } finally {
             if (s != null) {
-                sendStop(s);
+                sendStop(s, subStream ? 1 : 0);
                 try {
                     s.close();
                 } catch (IOException ignored) {
