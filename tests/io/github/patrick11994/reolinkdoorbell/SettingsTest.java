@@ -56,19 +56,19 @@ public final class SettingsTest {
         Map<String, Object> values = new HashMap<>();
         check(new ReolinkPlugin.Settings(values).channel, 0);
         check(new ReolinkPlugin.Settings(values).streamPath, "/h264Preview_01_main");
-        values.put("channel", 3);
+        values.put("nvrChannel", 3);
         values.put("stream", "Sub (light)");
         check(new ReolinkPlugin.Settings(values).channel, 2);
         check(new ReolinkPlugin.Settings(values).streamPath, "/h264Preview_03_sub");
-        values.put("channel", 12.0);  // the settings page may hand a number over as a double
+        values.put("nvrChannel", 12.0);  // the settings page may hand a number over as a double
         check(new ReolinkPlugin.Settings(values).streamPath, "/h264Preview_12_sub");
-        values.put("channel", " 7 ");  // the text field as typed
+        values.put("nvrChannel", " 7 ");  // the text field as typed
         check(new ReolinkPlugin.Settings(values).channel, 6);
         check(new ReolinkPlugin.Settings(values).channelValid, true);
-        values.put("channel", "");
+        values.put("nvrChannel", "");
         check(new ReolinkPlugin.Settings(values).channel, 0);
         for (Object wrong : new Object[] {"seven", "0", "100", 0}) {
-            values.put("channel", wrong);
+            values.put("nvrChannel", wrong);
             check(new ReolinkPlugin.Settings(values).channelValid, false);
             check(new ReolinkPlugin.Settings(values).channel, 0);  // the doorbell's own channel until it is fixed
         }
