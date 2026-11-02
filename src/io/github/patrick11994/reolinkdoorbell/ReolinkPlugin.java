@@ -1019,7 +1019,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             wakeWordRestore = Boolean.TRUE.equals(values.get("wakeWordRestore"));
             musicRestore = Boolean.TRUE.equals(values.get("musicRestore"));
             callMode = !Boolean.FALSE.equals(values.get("callMode"));
-            int typed = channelNumber(values.get("channel"));
+            // nvrChannel, not channel: a beta stored channel as a number, and Kiosk Satellite refuses an update whose
+            // setting has another type than the one stored.
+            int typed = channelNumber(values.get("nvrChannel"));
             channelValid = typed >= 1 && typed <= 99;
             channel = channelValid ? typed - 1 : 0;
             // RTSP counts channels from 01, as the Reolink app does: channel 2 behind an NVR is h264Preview_02_main.
