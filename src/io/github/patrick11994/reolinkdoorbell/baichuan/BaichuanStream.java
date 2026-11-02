@@ -115,6 +115,32 @@ public final class BaichuanStream implements MediaStream {
         }
     }
 
+    /**
+     * What arrived between the preview request and the first picture. Through an NVR no picture came at all (#6):
+     * this tells an answer that never came from video that came under another message id or without a keyframe.
+     */
+    private static final class Waited {
+        private int answers;
+        private long videoBytes;
+        private int others;
+        private final StringBuilder kinds = new StringBuilder();
+
+        void answer(BcMessage m) {
+            answers++;
+            videoBytes += m.payload.length;
+        }
+
+        void other(BcMessage m) {
+            if (others++ < 5) kinds.append(kinds.length() == 0 ? "" : ", ").append("cmd ").append(m.command).append(" id ")
+                .append(Integer.toHexString(m.messageId)).append(" status ").append(m.statusOrEncryption).append(" ").append(m.payload.length).append(" bytes");
+        }
+
+        @Override public String toString() {
+            return answers + " answers to the preview with " + videoBytes + " bytes of video, " + others + " other messages"
+                + (kinds.length() == 0 ? "" : ": " + kinds + (others > 5 ? ", …" : ""));
+        }
+    }
+
     private void run() {
         BaichuanClient.Login s = null;
         try {
@@ -155,6 +181,7 @@ public final class BaichuanStream implements MediaStream {
                 }
             });
             boolean streaming = false;
+            Waited waited = new Waited();  // what came in before the first picture, for the log when none does
             long keyframeBy = System.nanoTime() / 1_000_000 + FIRST_KEYFRAME_MILLIS;
             boolean waiting = true;
             while (running) {
@@ -165,18 +192,22 @@ public final class BaichuanStream implements MediaStream {
                     s.socket.setSoTimeout(timeoutMillis);
                 } else if (waiting) {
                     long left = keyframeBy - System.nanoTime() / 1_000_000;
-                    if (left <= 0) throw new IOException("no picture within " + FIRST_KEYFRAME_MILLIS + " ms");
+                    if (left <= 0) throw new IOException("no picture within " + FIRST_KEYFRAME_MILLIS + " ms (" + waited + ")");
                     s.socket.setSoTimeout((int) left);
                 }
                 BcMessage m;
                 try {
                     m = BcMessage.read(s.in);
                 } catch (java.net.SocketTimeoutException quiet) {
-                    if (waiting) throw new IOException("no picture within " + FIRST_KEYFRAME_MILLIS + " ms");
+                    if (waiting) throw new IOException("no picture within " + FIRST_KEYFRAME_MILLIS + " ms (" + waited + ")");
                     throw quiet;
                 }
-                if (m.command != CMD_PREVIEW || m.messageId != id) continue;
+                if (m.command != CMD_PREVIEW || m.messageId != id) {
+                    if (waiting) waited.other(m);
+                    continue;
+                }
                 if (m.statusOrEncryption != 200) throw new IOException("the doorbell answered the preview with " + m.statusOrEncryption);
+                if (waiting) waited.answer(m);
                 if (m.payload.length == 0) continue;
                 byte[] p = m.payload;
                 String ext = m.body.length == 0 ? "" : new String(BcCrypto.aes(s.aesKey(), m.body, false), StandardCharsets.UTF_8);

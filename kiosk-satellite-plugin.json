@@ -3,7 +3,7 @@
   "apiVersion": 1,
   "id": "reolink-doorbell",
   "name": "Reolink Doorbell Intercom",
-  "version": "1.9.3",
+  "version": "1.9.4-beta.1",
   "minAndroidSdk": 26,
   "minAppVersion": "2026.10.42",
   "entryClass": "io.github.patrick11994.reolinkdoorbell.ReolinkPlugin",
@@ -46,7 +46,7 @@
       ]}
   ],
   "buttons": [
-    {"id": "check", "title": "Check the doorbell", "label": "Check", "group": "Doorbell", "description": "Checks the address, username and password, that the doorbell reports button presses, that it offers the chosen video stream, and that it accepts talk the way the Talk setting chooses.", "visibleWhen": {"key": "host", "notEmpty": true}}
+    {"id": "check", "title": "Check the doorbell", "label": "Check", "group": "Doorbell", "description": "Checks the address, username and password, that the doorbell reports button presses, that the chosen video stream comes through the way Video over chooses and this device can play it, and that the doorbell accepts talk the way the Talk setting chooses.", "visibleWhen": {"key": "host", "notEmpty": true}}
   ],
   "commands": [
     {"id": "show", "title": "Open"},

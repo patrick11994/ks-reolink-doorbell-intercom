@@ -483,7 +483,14 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         Thread thread = new Thread(() -> {
             try {
                 h.setupResult(run, "running", t.checking());
-                ConnectionCheck.Result result = ConnectionCheck.run(s.host, 9000, 554, s.streamPath, s.talkPath, s.username, s.password, VideoRenderer::canPlay, t);
+                ConnectionCheck.Result result = ConnectionCheck.run(s.host, 9000, 554, s.streamPath, s.videoPath, s.talkPath, s.username, s.password,
+                    (path, listener) -> path.equals("RTSP") ? new StreamHub(s.host, 554, s.streamPath, s.username, s.password, listener)
+                        : new BaichuanStream(s.host, 9000, s.username, s.password, s.streamPath.endsWith("_sub"), listener),
+                    new ConnectionCheck.Player() {
+                        @Override public Boolean canPlay(int width, int height) { return VideoRenderer.canPlay(width, height); }
+                        @Override public Boolean decodes(byte[] keyframe) { return VideoRenderer.decodes(keyframe); }
+                    },
+                    ReolinkPlugin.this::log, t);
                 h.setupResult(run, result.ok ? "success" : "error", result.message);
             } catch (RuntimeException | LinkageError gone) {
                 // The run or the session ended meanwhile.
