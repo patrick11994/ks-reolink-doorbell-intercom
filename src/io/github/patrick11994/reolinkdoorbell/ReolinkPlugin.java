@@ -497,7 +497,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         Thread thread = new Thread(() -> {
             try {
                 h.setupResult(run, "running", t.checking());
-                ConnectionCheck.Result result = ConnectionCheck.run(s.host, 9000, 554, s.streamPath, s.videoPath, s.talkPath, s.username, s.password, s.channel,
+                ConnectionCheck.Result result = !s.channelValid ? new ConnectionCheck.Result(false, t.checkBadChannel())
+                    : ConnectionCheck.run(s.host, 9000, 554, s.streamPath, s.videoPath, s.talkPath, s.username, s.password, s.channel,
                     (path, listener) -> path.equals("RTSP") ? new StreamHub(s.host, 554, s.streamPath, s.username, s.password, listener)
                         : new BaichuanStream(s.host, 9000, s.username, s.password, s.channel, s.streamPath.endsWith("_sub"), listener),
                     new ConnectionCheck.Player() {
@@ -987,6 +988,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         final long autoCloseMillis, maxCallMillis;
         final int callVolume, chimeVolume;
         final int channel;  // behind an NVR, the doorbell's channel there, counted from 0; 0 for a doorbell reached directly
+        final boolean channelValid;  // the Channel field held a number from 1 to 99; otherwise channel is 0 and Check says so
         final List<Cards.Card> cards;
 
         Settings(Map<String, Object> values) {
@@ -1017,8 +1019,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             wakeWordRestore = Boolean.TRUE.equals(values.get("wakeWordRestore"));
             musicRestore = Boolean.TRUE.equals(values.get("musicRestore"));
             callMode = !Boolean.FALSE.equals(values.get("callMode"));
-            Object number = values.get("channel");
-            channel = number instanceof Number ? Math.max(0, Math.min(98, ((Number) number).intValue() - 1)) : 0;
+            int typed = channelNumber(values.get("channel"));
+            channelValid = typed >= 1 && typed <= 99;
+            channel = channelValid ? typed - 1 : 0;
             // RTSP counts channels from 01, as the Reolink app does: channel 2 behind an NVR is h264Preview_02_main.
             streamPath = String.format(Locale.ROOT, "/h264Preview_%02d_", channel + 1) + (string(values, "stream").startsWith("Sub") ? "sub" : "main");
             Object volume = values.get("callVolume");
@@ -1037,6 +1040,19 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
         boolean sameConnection(Settings other) {
             return host.equals(other.host) && username.equals(other.username) && password.equals(other.password);
+        }
+
+        /** The Channel field as typed (a number in a text field, or a number from a beta that had a slider); -1 if none. */
+        static int channelNumber(Object value) {
+            if (value == null) return 1;
+            if (value instanceof Number) return ((Number) value).intValue();
+            String text = value.toString().trim();
+            if (text.isEmpty()) return 1;
+            try {
+                return Integer.parseInt(text);
+            } catch (NumberFormatException notANumber) {
+                return -1;
+            }
         }
 
         private static long autoClose(String choice) {

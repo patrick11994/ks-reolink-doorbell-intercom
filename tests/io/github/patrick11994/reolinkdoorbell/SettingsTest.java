@@ -62,8 +62,16 @@ public final class SettingsTest {
         check(new ReolinkPlugin.Settings(values).streamPath, "/h264Preview_03_sub");
         values.put("channel", 12.0);  // the settings page may hand a number over as a double
         check(new ReolinkPlugin.Settings(values).streamPath, "/h264Preview_12_sub");
-        values.put("channel", 0);
+        values.put("channel", " 7 ");  // the text field as typed
+        check(new ReolinkPlugin.Settings(values).channel, 6);
+        check(new ReolinkPlugin.Settings(values).channelValid, true);
+        values.put("channel", "");
         check(new ReolinkPlugin.Settings(values).channel, 0);
+        for (Object wrong : new Object[] {"seven", "0", "100", 0}) {
+            values.put("channel", wrong);
+            check(new ReolinkPlugin.Settings(values).channelValid, false);
+            check(new ReolinkPlugin.Settings(values).channel, 0);  // the doorbell's own channel until it is fixed
+        }
         System.out.println("SettingsTest passed (" + seen.size() + " choices)");
     }
 
