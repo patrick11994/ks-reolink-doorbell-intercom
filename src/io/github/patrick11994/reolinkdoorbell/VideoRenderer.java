@@ -82,6 +82,23 @@ final class VideoRenderer implements MediaStream.VideoSink {
         }
     }
 
+    /**
+     * For the Check button: whether the decoder a call creates can show a picture of this size. A decoder that cannot
+     * fails at configure, as the Echo Show 8's does with the main stream. True when it cannot tell.
+     */
+    static boolean canPlay(int width, int height) {
+        MediaCodec codec = null;
+        try {
+            codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
+            MediaCodecInfo.VideoCapabilities video = codec.getCodecInfo().getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).getVideoCapabilities();
+            return video == null || video.isSizeSupported(width, height);
+        } catch (java.io.IOException | RuntimeException unknown) {
+            return true;  // no answer: a call says what goes wrong
+        } finally {
+            if (codec != null) codec.release();
+        }
+    }
+
     /** The decoder fell behind: drop the backlog and restart at the next keyframe instead of lagging. */
     private void dropBacklog(Frame frame, String why) {
         int frames = queue.size();

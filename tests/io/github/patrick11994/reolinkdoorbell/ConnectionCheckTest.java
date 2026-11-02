@@ -11,21 +11,21 @@ import io.github.patrick11994.reolinkdoorbell.talk.TalkTest;
 public final class ConnectionCheckTest {
     public static void main(String[] args) throws Exception {
         Texts english = Texts.of("English"), dutch = Texts.of("Nederlands");
-        check(ConnectionCheck.run("", 9000, 554, MAIN, "Automatic", "u", "p", english).message, english.checkNotConfigured());
+        check(ConnectionCheck.run("", 9000, 554, MAIN, "Automatic", "u", "p", PLAYS, english).message, english.checkNotConfigured());
         check(dutch.answer(), "Opnemen");
 
         int closed;
         try (ServerSocket probe = new ServerSocket(0)) {
             closed = probe.getLocalPort();
         }
-        ConnectionCheck.Result unreachable = ConnectionCheck.run("127.0.0.1", closed, closed, MAIN, "Automatic", "u", "p", english);
+        ConnectionCheck.Result unreachable = ConnectionCheck.run("127.0.0.1", closed, closed, MAIN, "Automatic", "u", "p", PLAYS, english);
         check(unreachable.ok, false);
         check(unreachable.message, english.checkUnreachable("127.0.0.1"));
 
         try (ServerSocket server = new ServerSocket(0)) {
             Thread doorbell = new Thread(() -> BaichuanClientTest.fakeDoorbell(server, "real", new CopyOnWriteArrayList<>()));
             doorbell.start();
-            ConnectionCheck.Result refused = ConnectionCheck.run("127.0.0.1", server.getLocalPort(), closed, MAIN, "Automatic", BaichuanClientTest.USER, "wrong", english);
+            ConnectionCheck.Result refused = ConnectionCheck.run("127.0.0.1", server.getLocalPort(), closed, MAIN, "Automatic", BaichuanClientTest.USER, "wrong", PLAYS, english);
             check(refused.message, english.checkLoginRefused());
             doorbell.join(3000);
         }
@@ -43,7 +43,7 @@ public final class ConnectionCheckTest {
             });
             doorbell.start();
             camera.start();
-            ConnectionCheck.Result garbled = ConnectionCheck.run("127.0.0.1", server.getLocalPort(), rtsp.getLocalPort(), MAIN, "Automatic", BaichuanClientTest.USER, "real", english);
+            ConnectionCheck.Result garbled = ConnectionCheck.run("127.0.0.1", server.getLocalPort(), rtsp.getLocalPort(), MAIN, "Automatic", BaichuanClientTest.USER, "real", PLAYS, english);
             check(garbled.message, english.checkNoVideo());
             doorbell.join(3000);
             camera.join(3000);
@@ -62,6 +62,14 @@ public final class ConnectionCheckTest {
         check(doorbell(noTalk, backchannel, MAIN, "Baichuan", requests, english), english.checkNoBaichuanTalk());
         check(doorbell(BaichuanTalkTest.ABILITY, video, MAIN, "ONVIF", requests, english), english.checkNoTalk());
         check(doorbell(BaichuanTalkTest.ABILITY, video, MAIN, "Baichuan", requests, english), english.checkOk());
+        // A panel that cannot play the stream's picture size: the check says so, and which stream to pick instead.
+        String main = video.replace("a=recvonly", "a=fmtp:96 packetization-mode=1;sprop-parameter-sets=Z2QAM6wVFKAoAPGQ,aO48sA==\r\na=recvonly");
+        String sub = video.replace("a=recvonly", "a=fmtp:96 packetization-mode=1;sprop-parameter-sets=Z2QAM6wVFKCgPZA=,aO48sA==\r\na=recvonly");
+        check(doorbell(BaichuanTalkTest.ABILITY, main, MAIN, "Automatic", requests, FULL_HD, english), english.checkMainTooLarge("2560x1920"));
+        check(english.checkMainTooLarge("2560x1920").contains("Sub (light)"), true);
+        check(doorbell(BaichuanTalkTest.ABILITY, sub, "/h264Preview_01_sub", "Automatic", requests, FULL_HD, english), english.checkOk());
+        check(doorbell(BaichuanTalkTest.ABILITY, main, MAIN, "Automatic", requests, english), english.checkOk());
+        check(doorbell(BaichuanTalkTest.ABILITY, sub, "/h264Preview_01_sub", "Automatic", requests, (width, height) -> false, english), english.checkVideoTooLarge("640x480"));
 
         // The event session's reasons, in a few words; anything unknown is a lost connection.
         check(ConnectionCheck.problem("IOException: the doorbell stopped answering", dutch), "reageert niet");
@@ -73,9 +81,16 @@ public final class ConnectionCheckTest {
     }
 
     private static final String MAIN = "/h264Preview_01_main";
+    private static final ConnectionCheck.Player PLAYS = (width, height) -> true;
+    /** An Echo Show 8: its decoder fails on the doorbell's 2560x1920 main stream. */
+    private static final ConnectionCheck.Player FULL_HD = (width, height) -> width <= 1920 && height <= 1088;
 
     /** Runs the check against a fake doorbell: Baichuan logins answering TalkAbility, and RTSP describing sdp. */
     private static String doorbell(String ability, String sdp, String path, String talkPath, List<String> requests, Texts texts) throws Exception {
+        return doorbell(ability, sdp, path, talkPath, requests, PLAYS, texts);
+    }
+
+    private static String doorbell(String ability, String sdp, String path, String talkPath, List<String> requests, ConnectionCheck.Player player, Texts texts) throws Exception {
         requests.clear();
         try (ServerSocket baichuan = new ServerSocket(0); ServerSocket rtsp = new ServerSocket(0)) {
             Thread logins = new Thread(() -> {
@@ -85,7 +100,7 @@ public final class ConnectionCheckTest {
             logins.setDaemon(true);  // a check that needs one login leaves the second accept waiting until the socket closes
             logins.start();
             camera.start();
-            String message = ConnectionCheck.run("127.0.0.1", baichuan.getLocalPort(), rtsp.getLocalPort(), path, talkPath, BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, texts).message;
+            String message = ConnectionCheck.run("127.0.0.1", baichuan.getLocalPort(), rtsp.getLocalPort(), path, talkPath, BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, player, texts).message;
             camera.join(3000);
             return message;
         }
