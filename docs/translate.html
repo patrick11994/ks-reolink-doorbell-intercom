@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Translate Reolink Doorbell Intercom</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --text: #1f2328; --muted: #5d636b; --line: #dcdad4;
+    --accent: #2f6f6a; --accent-text: #ffffff; --todo: #b26b00; --todo-bg: #fff4e0;
+    --bad: #b3261e; --bad-bg: #fdeceb; --ok: #2e7d32; --field: #fbfaf8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151719; --panel: #1e2124; --text: #e6e6e3; --muted: #a2a7ad; --line: #34383d;
+      --accent: #7fc4bd; --accent-text: #0f2523; --todo: #f0b35a; --todo-bg: #33270f;
+      --bad: #f2a29c; --bad-bg: #3a1b19; --ok: #8fd694; --field: #181a1d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 120px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  h2 { font-size: 1rem; margin: 28px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  p.lead { margin: 0 0 20px; color: var(--muted); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .setup { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: .875rem; color: var(--muted); }
+  select, input, textarea { font: inherit; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  textarea { width: 100%; resize: vertical; min-height: 2.6em; }
+  select:focus, input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px; padding: 8px 16px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.small { padding: 4px 12px; font-size: .875rem; }
+  .progress { margin-top: 16px; }
+  .bar { height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+  .progress-text { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: .875rem; color: var(--muted); margin-top: 6px; }
+  .filter { display: flex; gap: 16px; margin-top: 12px; font-size: .9rem; }
+  .filter label { flex-direction: row; align-items: center; gap: 6px; color: var(--text); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
+  .row:first-of-type { border-top: 0; }
+  .row.todo { background: linear-gradient(90deg, var(--todo-bg), transparent 60%); margin: 0 -16px; padding: 14px 16px; }
+  .english { white-space: pre-wrap; }
+  .note { font-size: .85rem; color: var(--muted); margin-top: 4px; }
+  .key { font: .75rem ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); margin-top: 4px; }
+  .tag { display: inline-block; font-size: .75rem; font-weight: 600; color: var(--todo); border: 1px solid var(--todo); border-radius: 999px; padding: 0 8px; margin-bottom: 4px; }
+  .was { font-size: .85rem; color: var(--muted); margin-top: 6px; white-space: pre-wrap; }
+  .was del { color: var(--bad); }
+  .warn { font-size: .85rem; color: var(--bad); background: var(--bad-bg); border-radius: 6px; padding: 4px 8px; margin-top: 6px; }
+  .actions { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); }
+  .actions .inner { max-width: 980px; margin: 0 auto; padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .actions .status { flex: 1 1 200px; font-size: .875rem; color: var(--muted); }
+  .error { color: var(--bad); }
+  .hidden { display: none !important; }
+  @media (max-width: 680px) { .row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Translate Reolink Doorbell Intercom</h1>
+  <p class="lead">Translate the texts on the call screen, the status and the Check button. Your work stays in this browser until you send it in an issue; nothing is uploaded.</p>
+
+  <div class="panel">
+    <div class="setup">
+      <label>Language
+        <select id="language"></select>
+      </label>
+      <label id="new-code-field" class="hidden">Language code
+        <input id="new-code" placeholder="de, or pt-BR" size="10" autocomplete="off">
+      </label>
+      <label id="new-name-field" class="hidden">Its name, in that language
+        <input id="new-name" placeholder="Deutsch" size="18" autocomplete="off">
+      </label>
+      <button id="discard" class="small hidden" type="button">Start over</button>
+    </div>
+    <div class="progress">
+      <div class="bar" role="progressbar" aria-label="Translated" aria-valuemin="0" aria-valuemax="100"><div id="bar"></div></div>
+      <div class="progress-text"><span id="progress"></span><span id="draft-note"></span></div>
+    </div>
+    <div class="filter" role="radiogroup" aria-label="Show">
+      <label><input type="radio" name="show" value="work" checked> Only what needs work</label>
+      <label><input type="radio" name="show" value="all"> Everything</label>
+    </div>
+  </div>
+
+  <p id="load-error" class="error hidden"></p>
+  <div id="sections"></div>
+</main>
+
+<div class="actions">
+  <div class="inner">
+    <span class="status" id="action-status">Download the file, or copy it and paste it into a translation issue.</span>
+    <button id="download" type="button">Download</button>
+    <button id="copy" class="primary" type="button">Copy and open issue</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  const REPO = 'https://github.com/patrick11994/ks-reolink-doorbell-intercom';
+  const params = new URLSearchParams(location.search);
+  // On GitHub Pages the texts come from the repository; served locally, from the files next to this page.
+  const BASE = location.hostname.endsWith('github.io')
+    ? 'https://raw.githubusercontent.com/patrick11994/ks-reolink-doorbell-intercom/' + (params.get('ref') || 'main') + '/'
+    : '../';
+  const LINE = /^([A-Za-z0-9_.-]+)=(.*)$/;
+  const TODO = '# TODO ', UPDATE = '# TODO update, English now: ', WAS = '# TODO update, English was: ';
+  const PLACEHOLDER = /\{\w+\}/g;
+  const $ = id => document.getElementById(id);
+
+  let english = [];      // {section, note, key, text} in file order, plus section headings as {heading}
+  let names = {};        // code -> name
+  let entries = {};      // key -> {value, outdated, was, reviewed}
+  let code = '', name = '';
+
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* no storage: the work lasts until the tab closes */ } },
+    remove(k) { try { localStorage.removeItem(k); } catch (e) {} },
+  };
+
+  const shown = text => text.replace(/\\n/g, '\n');      // the file's \n as a line break
+  const stored = text => text.replace(/\r?\n/g, '\\n');  // and back
+
+  async function fetchText(path) {
+    const response = await fetch(BASE + path, { cache: 'no-cache' });
+    if (!response.ok) throw new Error(path + ': ' + response.status);
+    return response.text();
+  }
+
+  function parseEnglish(text) {
+    const out = [];
+    let note = '', started = false;
+    for (const line of text.split(/\r?\n/)) {
+      if (!started) { if (line.startsWith('#')) continue; started = true; }
+      if (line.startsWith('#:')) { note = line.slice(2).trim(); continue; }
+      if (line.startsWith('#')) { out.push({ heading: line.slice(1).trim() }); continue; }
+      const m = LINE.exec(line);
+      if (m) { out.push({ key: m[1], text: m[2], note }); note = ''; }
+    }
+    return out;
+  }
+
+  function parseLanguage(text) {
+    const found = {};
+    let flagged = false, was = null;
+    for (const line of text.split(/\r?\n/)) {
+      if (line.startsWith(WAS)) { was = line.slice(WAS.length); continue; }
+      if (line.startsWith(UPDATE)) { flagged = true; continue; }
+      const m = LINE.exec(line);
+      if (m) found[m[1]] = { value: m[2], outdated: flagged, was: flagged ? was : null, reviewed: false };
+      if (!line.startsWith('#:')) { flagged = false; was = null; }
+    }
+    return found;
+  }
+
+  function parseNames(text) {
+    const out = {};
+    for (const line of text.split(/\r?\n/)) { const m = LINE.exec(line); if (m && m[1] !== 'en') out[m[1]] = m[2]; }
+    return out;
+  }
+
+  function needsWork(key) {
+    const e = entries[key];
+    return !e || !e.value.trim() || (e.outdated && !e.reviewed) || problems(key).length > 0;
+  }
+
+  function problems(key) {
+    const e = entries[key], source = english.find(x => x.key === key);
+    if (!e || !e.value.trim() || !source) return [];
+    const list = [];
+    const want = (source.text.match(PLACEHOLDER) || []).sort().join(' '), got = (e.value.match(PLACEHOLDER) || []).sort().join(' ');
+    if (want !== got) list.push(want ? 'Keep ' + want + ' exactly as it is: the plugin fills it in.' : 'Leave out ' + got + ': this text has no placeholders.');
+    const lines = source.text.split('\\n').length, gotLines = e.value.split('\\n').length;
+    if (lines !== gotLines) list.push('The English has ' + lines + (lines === 1 ? ' line' : ' lines') + ' here; keep the same number.');
+    return list;
+  }
+
+  function saveDraft() {
+    if (!code) return;
+    store.set('translate:' + code, JSON.stringify({ name, entries }));
+    $('draft-note').textContent = 'Saved in this browser';
+  }
+
+  function render() {
+    const onlyWork = document.querySelector('input[name="show"]:checked').value === 'work';
+    const root = $('sections');
+    root.textContent = '';
+    if (!code) {
+      const hint = document.createElement('p'); hint.className = 'lead';
+      hint.textContent = 'Choose a language above, or "A new language…" with its code and name, to see the texts.';
+      root.append(hint);
+      $('progress').textContent = ''; $('bar').style.width = '0';
+      return;
+    }
+    let panel = null, heading = null, rows = 0, sectionRows = 0;
+    const flush = () => { if (panel && sectionRows === 0) { panel.remove(); heading.remove(); } };
+    for (const item of english) {
+      if (item.heading !== undefined) {
+        flush();
+        heading = document.createElement('h2'); heading.textContent = item.heading;
+        panel = document.createElement('div'); panel.className = 'panel';
+        root.append(heading, panel); sectionRows = 0;
+        continue;
+      }
+      if (onlyWork && !needsWork(item.key)) continue;
+      panel.append(row(item)); rows++; sectionRows++;
+    }
+    flush();
+    if (rows === 0) {
+      const done = document.createElement('p');
+      done.textContent = onlyWork ? 'Nothing left to do. Download the file or send it in an issue.' : '';
+      root.append(done);
+    }
+    progress();
+  }
+
+  function row(item) {
+    const e = entries[item.key];
+    const div = document.createElement('div');
+    div.className = 'row' + (needsWork(item.key) ? ' todo' : '');
+    const left = document.createElement('div');
+    if (!e || !e.value.trim()) left.append(tag('Not translated yet'));
+    else if (e.outdated && !e.reviewed) left.append(tag('English changed'));
+    const en = document.createElement('div'); en.className = 'english'; en.textContent = shown(item.text);
+    left.append(en);
+    if (e && e.outdated && !e.reviewed && e.was) {
+      const was = document.createElement('div'); was.className = 'was';
+      const del = document.createElement('del'); del.textContent = shown(e.was);
+      was.append('Before: ', del);
+      left.append(was);
+    }
+    if (item.note) { const note = document.createElement('div'); note.className = 'note'; note.textContent = item.note; left.append(note); }
+    const key = document.createElement('div'); key.className = 'key'; key.textContent = item.key; left.append(key);
+
+    const right = document.createElement('div');
+    const area = document.createElement('textarea');
+    area.setAttribute('aria-label', 'Translation of: ' + shown(item.text));
+    area.value = e ? shown(e.value) : '';
+    area.rows = Math.max(1, shown(item.text).split('\n').length, Math.ceil(item.text.length / 48));
+    const warn = document.createElement('div'); warn.className = 'warn hidden';
+    area.addEventListener('input', () => {
+      const entry = entries[item.key] || (entries[item.key] = { value: '', outdated: false, was: null, reviewed: false });
+      entry.value = stored(area.value);
+      if (entry.outdated) entry.reviewed = true;  // edited after the English changed: it counts as checked
+      showProblems(item.key, warn);
+      div.classList.toggle('todo', needsWork(item.key));
+      saveDraft(); progress();
+    });
+    right.append(area, warn);
+    if (e && e.outdated && !e.reviewed) {
+      const keep = document.createElement('button');
+      keep.type = 'button'; keep.className = 'small'; keep.textContent = 'Still correct';
+      keep.style.marginTop = '6px';
+      keep.addEventListener('click', () => { e.reviewed = true; saveDraft(); keep.remove(); div.classList.toggle('todo', needsWork(item.key)); progress(); });
+      right.append(keep);
+    }
+    showProblems(item.key, warn);
+    div.append(left, right);
+    return div;
+  }
+
+  function tag(text) { const t = document.createElement('span'); t.className = 'tag'; t.textContent = text; return t; }
+
+  function showProblems(key, warn) {
+    const list = problems(key);
+    warn.textContent = list.join(' ');
+    warn.classList.toggle('hidden', list.length === 0);
+  }
+
+  function progress() {
+    const keys = english.filter(x => x.key).map(x => x.key);
+    const done = keys.filter(k => !needsWork(k)).length;
+    const percent = keys.length ? Math.floor(100 * done / keys.length) : 0;
+    $('bar').style.width = percent + '%';
+    document.querySelector('.bar').setAttribute('aria-valuenow', percent);
+    $('progress').textContent = done + ' of ' + keys.length + ' texts done (' + percent + '%)';
+  }
+
+  /** The file, in the layout the repository's tools/translations.py reads and writes. */
+  function file() {
+    const out = ['# Reolink Doorbell Intercom: the plugin\'s own texts in ' + (name || code) + '. Made with the translation page.'];
+    for (const item of english) {
+      if (item.heading !== undefined) { out.push('', '# ' + item.heading); continue; }
+      const e = entries[item.key];
+      if (!e || !e.value.trim()) { if (item.note) out.push('#: ' + item.note); out.push(TODO + item.key + '=' + item.text); continue; }
+      if (e.outdated && !e.reviewed) { out.push(UPDATE + item.text); if (e.was) out.push(WAS + e.was); }
+      if (item.note) out.push('#: ' + item.note);
+      out.push(item.key + '=' + e.value.trim());
+    }
+    return out.join('\n') + '\n';
+  }
+
+  function ready() {
+    if (!code) { $('action-status').textContent = 'Choose a language first.'; return false; }
+    if (!/^[a-z]{2,3}(-[A-Z]{2})?$/.test(code)) { $('action-status').textContent = 'The language code looks like de, or pt-BR for a region.'; return false; }
+    return true;
+  }
+
+  $('download').addEventListener('click', () => {
+    if (!ready()) return;
+    const blob = new Blob([file()], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = code + '.properties.txt';
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    $('action-status').textContent = 'Saved as ' + code + '.properties.txt: attach it to a translation issue.';
+  });
+
+  $('copy').addEventListener('click', async () => {
+    if (!ready()) return;
+    let copied = true;
+    try { await navigator.clipboard.writeText(file()); } catch (e) { copied = false; }
+    const issue = REPO + '/issues/new?template=translation.yml&title=' + encodeURIComponent('Translation: ' + (name || code))
+      + '&language=' + encodeURIComponent((name || code) + ' (' + code + ')');
+    window.open(issue, '_blank', 'noopener');
+    $('action-status').textContent = copied ? 'Copied. Paste it into "The file" in the issue that just opened.'
+      : 'Copying was not allowed here: use Download and attach the file instead.';
+  });
+
+  async function choose(value) {
+    $('load-error').classList.add('hidden');
+    const isNew = value === '__new';
+    $('new-code-field').classList.toggle('hidden', !isNew);
+    $('new-name-field').classList.toggle('hidden', !isNew);
+    if (isNew) { code = $('new-code').value.trim(); name = $('new-name').value.trim(); entries = {}; }
+    else {
+      code = value; name = names[value] || value;
+      try { entries = parseLanguage(await fetchText('assets/i18n/' + code + '.properties')); }
+      catch (e) { entries = {}; showError('Could not load ' + code + '.properties (' + e.message + ').'); }
+    }
+    const draft = code ? store.get('translate:' + code) : null;
+    if (draft) {
+      try {
+        const saved = JSON.parse(draft);
+        // Today's English decides what is out of date; the draft only brings back what was typed and checked.
+        for (const [k, v] of Object.entries(saved.entries || {})) {
+          const base = entries[k];
+          entries[k] = { value: v.value, outdated: base ? base.outdated : false, was: base ? base.was : null, reviewed: !!v.reviewed };
+        }
+        if (isNew && saved.name) { name = saved.name; $('new-name').value = saved.name; }
+        $('draft-note').textContent = 'Your earlier work in this browser is back';
+      } catch (e) { /* a broken draft: start from the repository */ }
+    } else {
+      $('draft-note').textContent = '';
+    }
+    $('discard').classList.toggle('hidden', !draft);
+    render();
+  }
+
+  function showError(text) { const p = $('load-error'); p.textContent = text; p.classList.remove('hidden'); }
+
+  $('language').addEventListener('change', e => choose(e.target.value));
+  $('new-code').addEventListener('change', () => choose('__new'));
+  $('new-name').addEventListener('input', () => { name = $('new-name').value.trim(); saveDraft(); });
+  $('discard').addEventListener('click', () => { store.remove('translate:' + code); choose($('language').value); });
+  document.querySelectorAll('input[name="show"]').forEach(r => r.addEventListener('change', render));
+
+  (async () => {
+    try {
+      const [en, list] = await Promise.all([fetchText('assets/i18n/en.properties'), fetchText('assets/i18n/languages.properties')]);
+      english = parseEnglish(en); names = parseNames(list);
+    } catch (e) {
+      showError('Could not load the texts from the repository (' + e.message + '). Try again later.');
+      return;
+    }
+    const select = $('language');
+    const pick = document.createElement('option'); pick.value = ''; pick.textContent = 'Choose…'; select.append(pick);
+    for (const [c, n] of Object.entries(names)) { const o = document.createElement('option'); o.value = c; o.textContent = n; select.append(o); }
+    const fresh = document.createElement('option'); fresh.value = '__new'; fresh.textContent = 'A new language…'; select.append(fresh);
+    const wanted = params.get('lang');
+    if (wanted && names[wanted]) { select.value = wanted; choose(wanted); } else render();
+  })();
+})();
+</script>
+</body>
+</html>

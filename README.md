@@ -177,7 +177,9 @@ The call screen, the messages, the readings and the Check button's results can b
 
 <!-- /translations -->
 
-**To improve a language** in the table: open its file. Each line starting with `# TODO` still needs work: a missing text (remove `# TODO `, then translate after the `=`), or a text whose English changed (fix the line below it, then remove the `# TODO update` line).
+**The easiest way is the [translation page](https://patrick11994.github.io/ks-reolink-doorbell-intercom/translate.html).** Pick a language, or start a new one, and translate the texts in your browser: it shows what each text is for, what still needs work, and warns when a `{placeholder}` goes missing. When you're done, it copies the result for a translation issue, or saves it as a file. Nothing is uploaded until you post the issue.
+
+You can also edit a file by hand. **To improve a language** in the table: open its file. Each line starting with `# TODO` still needs work: a missing text (remove `# TODO `, then translate after the `=`), or a text whose English changed (fix the line below it, then remove the `# TODO update` line).
 
 **To add a language:** copy [`en.properties`](assets/i18n/en.properties) to a file named after the language code, such as `de.properties` for German, and translate everything after each `=`.
 

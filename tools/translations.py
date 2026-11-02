@@ -21,7 +21,7 @@ I18N = ROOT / 'assets' / 'i18n'
 SOURCES = ROOT / 'tools' / 'i18n-sources'
 README = ROOT / 'README.md'
 TABLE_START, TABLE_END = '<!-- translations -->', '<!-- /translations -->'
-TODO, UPDATE = '# TODO ', '# TODO update, English now: '
+TODO, UPDATE, WAS = '# TODO ', '# TODO update, English now: ', '# TODO update, English was: '
 REPO = 'https://github.com/patrick11994/ks-reolink-doorbell-intercom'
 LINE = re.compile(r'^([A-Za-z0-9_.-]+)=(.*)$')
 
@@ -38,17 +38,21 @@ def read(path):
 
 
 def outdated(path):
-    """The keys a '# TODO update' line stands above in a language file."""
-    keys, flagged = set(), False
+    """The keys '# TODO update' lines stand above in a language file, each with the English it was made from."""
+    keys, flagged, was = {}, False, None
     if path.exists():
         for line in path.read_text(encoding='utf-8').splitlines():
+            if line.startswith(WAS):
+                was = line[len(WAS):]
+                continue
             if line.startswith(UPDATE):
                 flagged = True
                 continue
             m = LINE.match(line)
             if m and flagged:
-                keys.add(m.group(1))
-            flagged = False
+                keys[m.group(1)] = was
+            if not line.startswith('#:'):  # a note may stand between the flag and its text
+                flagged, was = False, None
     return keys
 
 
@@ -71,8 +75,9 @@ def sync(code, name, english):
     sources = read(SOURCES / f'{code}.properties')
     out = [f"# Reolink Doorbell Intercom: the plugin's own texts in {name}. See the README's Translations.",
            '# A line starting with "# TODO key=" still needs translating: remove "# TODO ", then translate after the =.',
-           '# A "# TODO update" line means the English text changed: fix the translation below it, then remove that line.',
-           '# Keep the {placeholders} as they are.']
+           '# A "# TODO update" line means the English text changed: fix the translation below it, then remove the TODO lines.',
+           '# A line starting with #: says where the text below it appears. Keep the {placeholders} as they are.',
+           '# Or use the translation page, which does all of this for you: see the README.']
     kept, translated, stale = {}, 0, 0
     for line in english_body():
         m = LINE.match(line)
@@ -90,7 +95,14 @@ def sync(code, name, english):
         # just sent) counts as made from today's English.
         if key in flagged or sources.get(key, source) != source:
             stale += 1
+            was = flagged[key] if key in flagged else sources[key]
+            # The notes stay above the text: move the flag above the note the loop just wrote.
+            note = out.pop() if out and out[-1].startswith('#:') else None
             out.append(f'{UPDATE}{source}')
+            if was is not None:
+                out.append(f'{WAS}{was}')
+            if note is not None:
+                out.append(note)
         kept[key] = source
         out.append(f'{key}={texts[key]}')
     source_text = '\n'.join([f'# The English text each {code} translation was made from; see tools/translations.py.']

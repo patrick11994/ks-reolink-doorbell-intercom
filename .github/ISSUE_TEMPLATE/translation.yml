@@ -19,7 +19,7 @@ body:
     id: file
     attributes:
       label: The file
-      description: Attach the translated file here. GitHub does not accept .properties files, so rename it to .txt first, such as de.properties.txt.
+      description: Paste the text the translation page copied, or attach the file. GitHub does not accept .properties files, so attach it as .txt, such as de.properties.txt.
     validations:
       required: true
   - type: textarea
