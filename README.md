@@ -32,7 +32,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 - **Open it any time** to look outside. Add the **Open** action to the kiosk menu, a gesture or Home Assistant. Opened by hand, it stays open until you close it.
 - **Quick actions on the call screen.** Up to four cards above the call buttons, styled like Home Assistant's tiles. Each runs an action you pick with the same chooser as Gestures: a Home Assistant service or script, such as opening the door through a relay or toggling the lights, or anything else a gesture can do on the panel, such as opening a dashboard view. A card can also show the live state of a Home Assistant entity, such as a light or a lock. A card for a door or gate can ask to be held, so it never runs by accident.
 - **Pauses the music** if you like: at the ring, or once you listen or talk, and resumes it afterwards.
-- **Check button** on the settings page. It tests the address, the login, video and talking, and says what to fix.
+- **Check button** on the settings page. It tests the address, the login, video and talking with your settings, and whether this device can play the video, and says what to fix.
 - **English and Dutch** for the call screen and messages.
 
 ## Requirements
@@ -79,7 +79,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Doorbell | **Doorbell address** | IP address or hostname of the doorbell | |
 | Doorbell | **Username** / **Password** | A Reolink user on the doorbell. The password is stored as a masked secret. | |
 | Doorbell | **Name** | Shown at the top of the call screen. Empty shows *Front door*. | empty |
-| Doorbell | **Check the doorbell** | Tests button presses, video and talking | |
+| Doorbell | **Check the doorbell** | Tests button presses, video and talking with your settings, and whether this device can play the video | |
 | Ringing | **Play a chime** | A ding-dong when the button is pressed | on |
 | Ringing | **Chime volume** | How loud the chime itself is, 5 to 100. 40 is a soft chime. | 40 |
 | Ringing | **Chime sound** | Which Android volume the chime follows: *Notifications*, *Media* or *Alarm* | Notifications |
@@ -147,6 +147,8 @@ The card's colour follows the state the way Home Assistant does: a light that is
 | **Check** says it cannot reach the doorbell | The address, and that the panel and the doorbell are on the same network |
 | **Check** says the username or password is refused | Try the same user in the Reolink app |
 | **Check** says video does not work | Turn on RTSP in the Reolink app's Server Settings |
+| **Check** says this device cannot play the main stream | Set **Video** to *Sub (light)*. Some devices, such as the Echo Show 5 and 8, cannot play the doorbell's full picture |
+| **Check** says video only comes over RTSP | Set **Video over** to *RTSP*, so the picture does not wait for Baichuan first. This happens with a doorbell behind an NVR |
 | The picture takes about a second to show | The plugin fell back to RTSP. The Logs say so (*video: falling back to RTSP*). |
 | **Check** says there is no talk channel | Turn on ONVIF in the Reolink app's Server Settings |
 | The door hears you about 2 seconds late | The doorbell refused Baichuan talk and the plugin fell back to ONVIF. The Logs say so (*talk: falling back to the ONVIF backchannel*). |
