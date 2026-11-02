@@ -209,5 +209,7 @@ final class Texts {
     String checkNoBaichuanTalk() { return get("checkNoBaichuanTalk"); }
     String checkMainTooLarge(String size) { return format("checkMainTooLarge", "size", size); }
     String checkVideoTooLarge(String size) { return format("checkVideoTooLarge", "size", size); }
+    String checkNoBaichuanVideo() { return get("checkNoBaichuanVideo"); }
+    String checkVideoOverRtsp() { return get("checkVideoOverRtsp"); }
     String checkFailed(String detail) { return format("checkFailed", "detail", detail); }
 }

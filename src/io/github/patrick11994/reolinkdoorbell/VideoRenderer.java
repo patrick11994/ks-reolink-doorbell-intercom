@@ -83,19 +83,87 @@ final class VideoRenderer implements MediaStream.VideoSink {
     }
 
     /**
-     * For the Check button: whether the decoder a call creates can show a picture of this size. A decoder that cannot
-     * fails at configure, as the Echo Show 8's does with the main stream. True when it cannot tell.
+     * For the Check button: whether the decoder a call creates can show a picture of this size, or null when it does
+     * not say. A decoder that cannot fails at configure, as the Echo Show 8's does with the main stream.
      */
-    static boolean canPlay(int width, int height) {
+    static Boolean canPlay(int width, int height) {
         MediaCodec codec = null;
         try {
             codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
             MediaCodecInfo.VideoCapabilities video = codec.getCodecInfo().getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).getVideoCapabilities();
-            return video == null || video.isSizeSupported(width, height);
+            return video == null ? null : video.isSizeSupported(width, height);
         } catch (java.io.IOException | RuntimeException unknown) {
-            return true;  // no answer: a call says what goes wrong
+            return null;
         } finally {
             if (codec != null) codec.release();
+        }
+    }
+
+    /**
+     * For the Check button, when the decoder does not say: sets up the decoder a call creates, the same way, and decodes
+     * one keyframe into memory instead of onto the screen. True when a picture came out, false when the decoder refused
+     * it, null when the test itself gave no clear answer.
+     */
+    static Boolean decodes(byte[] keyframe) {
+        AvcConfig config = AvcConfig.of(keyframe);
+        if (config.size == null) return null;
+        MediaFormat format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, config.size.width, config.size.height);
+        byte[] sps = config.sps == null ? null : SpsInfo.lowDelay(config.sps);
+        if (config.complete()) {
+            format.setByteBuffer("csd-0", ByteBuffer.wrap(AvcConfig.withStartCode(sps != null ? sps : config.sps)));
+            format.setByteBuffer("csd-1", ByteBuffer.wrap(AvcConfig.withStartCode(config.pps)));
+        }
+        byte[] data = sps != null ? AvcConfig.withSps(keyframe, sps) : keyframe;
+        MediaCodec codec = null;
+        try {
+            try {
+                codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
+            } catch (java.io.IOException | RuntimeException none) {
+                return null;  // no decoder to ask: a call says what goes wrong
+            }
+            try {
+                codec.configure(format, null, null, 0);
+                codec.start();
+            } catch (RuntimeException refused) {
+                return false;  // as a call's decoder fails on a picture too large for it
+            }
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            boolean queued = false, ended = false;
+            long until = System.nanoTime() + 2_000_000_000L;
+            while (System.nanoTime() < until) {
+                if (!ended) {
+                    int input = codec.dequeueInputBuffer(10_000);
+                    if (input >= 0) {
+                        ByteBuffer buffer = codec.getInputBuffer(input);
+                        buffer.clear();
+                        if (!queued && data.length <= buffer.remaining()) {
+                            buffer.put(data);
+                            codec.queueInputBuffer(input, 0, data.length, 0, 0);
+                            queued = true;
+                        } else {
+                            // The end of the stream makes the decoder let go of what it holds.
+                            codec.queueInputBuffer(input, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM);
+                            ended = true;
+                            if (!queued) return null;  // the picture does not fit an input buffer: not this test's question
+                        }
+                    }
+                }
+                int output = codec.dequeueOutputBuffer(info, 10_000);
+                if (output >= 0) {
+                    boolean picture = info.size > 0 || (info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) == 0;
+                    codec.releaseOutputBuffer(output, false);
+                    if (picture) return true;
+                    if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) return null;  // ended without a picture
+                }
+            }
+            return null;
+        } catch (RuntimeException failed) {
+            return false;  // the decoder failed on the picture
+        } finally {
+            if (codec != null) {
+                try { codec.stop(); } catch (RuntimeException ignored) {}
+                codec.release();
+            }
         }
     }
 
