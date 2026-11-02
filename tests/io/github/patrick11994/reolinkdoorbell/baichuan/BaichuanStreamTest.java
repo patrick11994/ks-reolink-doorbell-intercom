@@ -23,6 +23,7 @@ public final class BaichuanStreamTest {
         silentAfterPreviewFailsFast();
         everyLensAndAudioKind();
         anNvrGoesByTheHeader();
+        anNvrSplitsFramesOverMessages();
         System.out.println("BaichuanStreamTest passed");
     }
 
@@ -162,6 +163,53 @@ public final class BaichuanStreamTest {
             stream.stop();
             nvr.join(3000);
         }
+    }
+
+    /**
+     * As natebgamer's NVR sends a frame (#6): its first part in a message whose extension says binaryData (encrypted up
+     * to encryptLen), the rest in messages without an extension, plain. A plain message before any packet is no video.
+     */
+    static void anNvrSplitsFramesOverMessages() throws Exception {
+        List<String> seen = new CopyOnWriteArrayList<>();
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread nvr = new Thread(() -> {
+                try (Socket socket = server.accept()) {
+                    socket.setSoTimeout(3000);
+                    DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+                    OutputStream out = socket.getOutputStream();
+                    byte[] key = BaichuanClientTest.fakeLogin(in, out, BaichuanClientTest.PASSWORD, new ArrayList<>());
+                    if (key == null) return;
+                    while (true) {
+                        BcMessage m = BcMessage.read(in);
+                        if (m.command != BaichuanStream.CMD_PREVIEW) continue;
+                        plain(out, m.messageId, "junk before any packet".getBytes(StandardCharsets.US_ASCII));
+                        send(out, m.messageId, key, info(640, 480, 15), -1);
+                        byte[] frame = concat(video("00dc", annexB(5, 3000), 0), video("01dc", annexB(1, 200), 66_000));
+                        send(out, m.messageId, key, java.util.Arrays.copyOf(frame, 600), 512);
+                        for (int at = 600; at < frame.length; at += 1000) plain(out, m.messageId, java.util.Arrays.copyOfRange(frame, at, Math.min(frame.length, at + 1000)));
+                        out.flush();
+                    }
+                } catch (Exception closed) {
+                    // The stream stopped.
+                }
+            });
+            nvr.start();
+            BaichuanStream stream = new BaichuanStream("127.0.0.1", server.getLocalPort(), BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, true, s -> seen.add(s), 2000);
+            stream.attachVideo((au, micros, key) -> seen.add("video " + au.length + (key ? " key" : "")));
+            stream.start();
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> seen.contains("video 204"), 3000, "both frames, the keyframe spread over plain messages");
+            check(seen.contains("video 3004 key"), true);
+            stream.stop();
+            nvr.join(3000);
+        }
+    }
+
+    /** A cmd 3 answer without an extension (payload offset 0): the whole message is plain media. */
+    static void plain(OutputStream out, int id, byte[] payload) throws Exception {
+        ByteBuffer h = ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN);
+        h.putInt(BcMessage.MAGIC).putInt(BaichuanStream.CMD_PREVIEW).putInt(payload.length).putInt(id).putShort((short) 200).putShort((short) BcMessage.CLASS_ZERO).putInt(0);
+        out.write(h.array());
+        out.write(payload);
     }
 
     /** A message id as Reolink lays it out. */

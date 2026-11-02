@@ -25,8 +25,15 @@ final class BcMessage {
     final int headerLength;
     final byte[] body;  // still encrypted when received: the XML part up to the payload offset
     final byte[] payload;  // binary payload after the XML, if any
+    // The header gave a payload offset: the body is an extension. Without one, the whole message is its body, which
+    // for a stream's continuation messages is plain media, not XML (an NVR sends them so, #6).
+    final boolean extended;
 
     BcMessage(int command, int messageId, int statusOrEncryption, int messageClass, int headerLength, byte[] body, byte[] payload) {
+        this(command, messageId, statusOrEncryption, messageClass, headerLength, body, payload, payload.length > 0);
+    }
+
+    BcMessage(int command, int messageId, int statusOrEncryption, int messageClass, int headerLength, byte[] body, byte[] payload, boolean extended) {
         this.command = command;
         this.messageId = messageId;
         this.statusOrEncryption = statusOrEncryption;
@@ -34,6 +41,7 @@ final class BcMessage {
         this.headerLength = headerLength;
         this.body = body;
         this.payload = payload;
+        this.extended = extended;
     }
 
     int channelByte() {
@@ -89,12 +97,13 @@ final class BcMessage {
         }
         // Pushes and replies are a few KB; a device must not make the Kiosk Satellite process allocate more.
         if (length < 0 || length > MAX_BODY) throw new IOException("bad Baichuan body length " + length);
-        if (payloadOffset <= 0 || payloadOffset > length) payloadOffset = length;
+        boolean extended = payloadOffset > 0 && payloadOffset <= length;
+        if (!extended) payloadOffset = length;
         byte[] body = new byte[payloadOffset];
         in.readFully(body);
         byte[] payload = new byte[length - payloadOffset];
         in.readFully(payload);
-        return new BcMessage(command, messageId, status, messageClass, headerLength, body, payload);
+        return new BcMessage(command, messageId, status, messageClass, headerLength, body, payload, extended);
     }
 
     private static void writeInt(ByteArrayOutputStream out, int value) {
