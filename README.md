@@ -166,7 +166,7 @@ The card's colour follows the state the way Home Assistant does: a light that is
 
 ## Translations
 
-The call screen, the messages, the readings and the Check button's results can be translated, and more languages are welcome. Every language is one text file in [`assets/i18n`](assets/i18n), so no code is needed.
+The call screen, the messages, the readings and the Check button's results can be translated, and more languages are welcome.
 
 <!-- translations -->
 
