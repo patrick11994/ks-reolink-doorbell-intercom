@@ -37,6 +37,7 @@ public final class BaichuanTalk implements TalkChannel {
     private final Listener listener;
     private final int timeoutMillis;
     private final TalkQueue queue = new TalkQueue(RATE * 40 / 1000 + 1025, RATE * 200 / 1000 + 1025);
+    private final int channel;
     private volatile boolean running;
     private final java.util.concurrent.atomic.AtomicBoolean ended = new java.util.concurrent.atomic.AtomicBoolean();
     private volatile long blocksSent;
@@ -46,10 +47,20 @@ public final class BaichuanTalk implements TalkChannel {
     private Thread thread;
 
     public BaichuanTalk(String host, int port, String username, String password, Listener listener) {
-        this(host, port, username, password, listener, 5_000);
+        this(host, port, username, password, 0, listener, 5_000);
+    }
+
+    /** channel: 0 for a doorbell reached directly; behind an NVR, its channel there, counted from 0. */
+    public BaichuanTalk(String host, int port, String username, String password, int channel, Listener listener) {
+        this(host, port, username, password, channel, listener, 5_000);
     }
 
     BaichuanTalk(String host, int port, String username, String password, Listener listener, int timeoutMillis) {
+        this(host, port, username, password, 0, listener, timeoutMillis);
+    }
+
+    BaichuanTalk(String host, int port, String username, String password, int channel, Listener listener, int timeoutMillis) {
+        this.channel = channel;
         this.host = host;
         this.port = port;
         this.username = username;
@@ -116,8 +127,12 @@ public final class BaichuanTalk implements TalkChannel {
 
     /** What TalkAbility offers, for the check: null when the doorbell does not talk ADPCM over Baichuan. */
     public static String probe(String host, int port, String username, String password) throws IOException {
+        return probe(host, port, username, password, 0);
+    }
+
+    public static String probe(String host, int port, String username, String password, int channel) throws IOException {
         try (BaichuanClient.Login s = BaichuanClient.login(host, port, username, password, 5_000)) {
-            Format f = Format.of(request(s, CMD_TALK_ABILITY, extension(s, false), new byte[0]));
+            Format f = Format.of(request(s, channel, CMD_TALK_ABILITY, extension(s, false, channel), new byte[0]));
             return f == null ? null : "adpcm " + f.rate + " Hz";
         }
     }
@@ -131,17 +146,17 @@ public final class BaichuanTalk implements TalkChannel {
                 if (!running) return;
                 session = s;
             }
-            Format format = Format.of(request(s, CMD_TALK_ABILITY, extension(s, false), new byte[0]));
+            Format format = Format.of(request(s, channel, CMD_TALK_ABILITY, extension(s, false, channel), new byte[0]));
             if (format == null) {
                 listener.onTalkState("talk refused: the doorbell offers no ADPCM talk over Baichuan");
                 return;
             }
-            byte[] config = BcCrypto.aes(s.aesKey(), format.talkConfig().getBytes(StandardCharsets.UTF_8), true);
-            BcMessage answer = request(s, CMD_TALK_CONFIG, extension(s, false), config);
+            byte[] config = BcCrypto.aes(s.aesKey(), format.talkConfig(channel).getBytes(StandardCharsets.UTF_8), true);
+            BcMessage answer = request(s, channel, CMD_TALK_CONFIG, extension(s, false, channel), config);
             if (answer.statusOrEncryption == 422) {
                 // Someone else is talking, or a session of ours died before its reset: the app resets and retries.
-                send(s, CMD_TALK_RESET, extension(s, false), new byte[0]);
-                answer = request(s, CMD_TALK_CONFIG, extension(s, false), config);
+                sendOn(s, channel, CMD_TALK_RESET, extension(s, false, channel), new byte[0]);
+                answer = request(s, channel, CMD_TALK_CONFIG, extension(s, false, channel), config);
             }
             if (answer.statusOrEncryption != 200) {
                 listener.onTalkState("talk refused: TalkConfig answered " + answer.statusOrEncryption);
@@ -165,7 +180,7 @@ public final class BaichuanTalk implements TalkChannel {
         } finally {
             if (s != null) {
                 try {
-                    send(s, CMD_TALK_RESET, extension(s, false), new byte[0]);  // free the doorbell's speaker for others
+                    sendOn(s, channel, CMD_TALK_RESET, extension(s, false, channel), new byte[0]);  // free the doorbell's speaker for others
                 } catch (IOException | RuntimeException ignored) {
                     // The session is gone anyway.
                 }
@@ -189,8 +204,8 @@ public final class BaichuanTalk implements TalkChannel {
         long blockNanos = perBlock * 1_000_000_000L / format.rate;
         ImaAdpcm encoder = new ImaAdpcm(SURVIVORS);
         short[] pcm = new short[perBlock];
-        byte[] ext = extension(s, true);
-        int talkId = s.nextId(0);
+        byte[] ext = extension(s, true, channel);
+        int talkId = s.nextId(channel);
         queue.dropQuietStart(QUIET_PEAK);  // what the microphone heard during the setup, unless someone spoke
         long next = System.nanoTime();
         while (running) {
@@ -244,14 +259,15 @@ public final class BaichuanTalk implements TalkChannel {
         return b.array();
     }
 
-    private static byte[] extension(BaichuanClient.Login s, boolean binary) {
+    private static byte[] extension(BaichuanClient.Login s, boolean binary, int channel) {
         String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<Extension version=\"1.1\">\n"
-            + (binary ? "<binaryData>1</binaryData>\n" : "") + "<channelId>0</channelId>\n</Extension>\n";
+            + (binary ? "<binaryData>1</binaryData>\n" : "") + "<channelId>" + channel + "</channelId>\n</Extension>\n";
         return BcCrypto.aes(s.aesKey(), xml.getBytes(StandardCharsets.UTF_8), true);
     }
 
-    private static void send(BaichuanClient.Login s, int command, byte[] ext, byte[] body) throws IOException {
-        send(s, s.nextId(0), command, ext, body);
+    /** A message on the doorbell's channel, with the next id. */
+    private static void sendOn(BaichuanClient.Login s, int channel, int command, byte[] ext, byte[] body) throws IOException {
+        send(s, s.nextId(channel), command, ext, body);
     }
 
     private static void send(BaichuanClient.Login s, int id, int command, byte[] ext, byte[] body) throws IOException {
@@ -263,8 +279,8 @@ public final class BaichuanTalk implements TalkChannel {
     }
 
     /** Sends a request and waits for its answer, before the reader thread runs. */
-    private static BcMessage request(BaichuanClient.Login s, int command, byte[] ext, byte[] body) throws IOException {
-        int id = s.nextId(0);
+    private static BcMessage request(BaichuanClient.Login s, int channel, int command, byte[] ext, byte[] body) throws IOException {
+        int id = s.nextId(channel);
         send(s, id, command, ext, body);
         while (true) {
             BcMessage m = BcMessage.read(s.in);
@@ -304,8 +320,8 @@ public final class BaichuanTalk implements TalkChannel {
             return new Format(rate, length, duplex == null ? "FDX" : duplex, mode == null ? "followVideoStream" : mode);
         }
 
-        String talkConfig() {
-            return "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<TalkConfig version=\"1.1\">\n<channelId>0</channelId>\n"
+        String talkConfig(int channel) {
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<TalkConfig version=\"1.1\">\n<channelId>" + channel + "</channelId>\n"
                 + "<duplex>" + duplex + "</duplex>\n<audioStreamMode>" + mode + "</audioStreamMode>\n<audioConfig>\n"
                 + "<audioType>adpcm</audioType>\n<sampleRate>" + rate + "</sampleRate>\n<samplePrecision>16</samplePrecision>\n"
                 + "<lengthPerEncoder>" + lengthPerEncoder + "</lengthPerEncoder>\n<soundTrack>mono</soundTrack>\n</audioConfig>\n"

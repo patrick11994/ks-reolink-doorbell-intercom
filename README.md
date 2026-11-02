@@ -45,7 +45,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 
 The cards need Kiosk Satellite's own Home Assistant connection (Settings > Home Assistant); the rest of the plugin works without it.
 
-A doorbell that is connected through a Reolink NVR or Home Hub, rather than directly to your network, is not supported yet.
+**A doorbell connected to a Reolink NVR** works too: enter the NVR's address and a user on the NVR, and set **Channel** to the doorbell's channel as the Reolink app shows it. A Reolink Home Hub has not been tested yet.
 
 ## Installation
 
@@ -76,8 +76,9 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 
 | Group | Setting | What it does | Default |
 |---|---|---|---|
-| Doorbell | **Doorbell address** | IP address or hostname of the doorbell | |
+| Doorbell | **Doorbell address** | IP address or hostname of the doorbell, or of the NVR it is connected to | |
 | Doorbell | **Username** / **Password** | A Reolink user on the doorbell. The password is stored as a masked secret. | |
+| Doorbell | **Channel** | Only for a doorbell connected to a Reolink NVR: its channel there, as the Reolink app shows it | 1 |
 | Doorbell | **Name** | Shown at the top of the call screen. Empty shows *Front door*. | empty |
 | Doorbell | **Check the doorbell** | Tests button presses, video and talking with your settings, and whether this device can play the video | |
 | Ringing | **Play a chime** | A ding-dong when the button is pressed | on |
@@ -148,7 +149,8 @@ The card's colour follows the state the way Home Assistant does: a light that is
 | **Check** says the username or password is refused | Try the same user in the Reolink app |
 | **Check** says video does not work | Turn on RTSP in the Reolink app's Server Settings |
 | **Check** says this device cannot play the main stream | Set **Video** to *Sub (light)*. Some devices, such as the Echo Show 5 and 8, cannot play the doorbell's full picture |
-| **Check** says video only comes over RTSP | Set **Video over** to *RTSP*, so the picture does not wait for Baichuan first. This happens with a doorbell behind an NVR |
+| **Check** says video only comes over RTSP | Set **Video over** to *RTSP*, so the picture does not wait for Baichuan first |
+| A doorbell behind an NVR does not ring | Check **Channel**. The Logs say on which channel a press came in (*events: a doorbell press on channel …*) |
 | The picture takes about a second to show | The plugin fell back to RTSP. The Logs say so (*video: falling back to RTSP*). |
 | **Check** says there is no talk channel | Turn on ONVIF in the Reolink app's Server Settings |
 | The door hears you about 2 seconds late | The doorbell refused Baichuan talk and the plugin fell back to ONVIF. The Logs say so (*talk: falling back to the ONVIF backchannel*). |
@@ -211,6 +213,7 @@ If the workflow fails, the draft stays. Fix the cause and run it again with `gh 
 - Plugin SDK, template and build tools: [Kiosk Satellite plugin template](https://github.com/jxlarrea/kiosk-satellite-plugins) (Apache-2.0)
 - Reolink's Baichuan protocol, for the button presses, was learned from [reolink_aio](https://github.com/starkillerOG/reolink_aio) (MIT). The plugin reimplements it and copies no code.
 - Talking over Baichuan was first learned from [neolink](https://github.com/QuantumEntangledAndy/neolink) (AGPL-3.0); the exact audio format the doorbell wants was then checked against the Reolink app's own traffic. No code was copied.
+- Doorbells behind an NVR: the message layout for streams through a recorder was learned from [reostream](https://github.com/VoltTech21/reostream)'s protocol notes (AGPL-3.0), with neolink. No code was copied.
 - Talking over the ONVIF audio backchannel follows the approach of [Scrypted](https://github.com/koush/scrypted)'s Reolink and ONVIF plugins. No code was copied.
 - The interface follows ideas from [UniFi Protect Doorbell](https://github.com/mark-andrew/kiosk-satellite-unifi-doorbell) and [Kiosk Phone](https://github.com/mpjanofsky/kiosk-phone).
 

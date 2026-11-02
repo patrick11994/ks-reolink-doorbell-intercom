@@ -25,7 +25,31 @@ public final class BaichuanTalkTest {
         resetsAndRetriesWhenBusy();
         refusedWithoutAdpcm();
         silentDoorbellEndsTalk();
+        talksOnAChannel();
         System.out.println("BaichuanTalkTest passed");
+    }
+
+    /** Behind an NVR, every talk request names the doorbell's channel: the fake checks each one, and the probe too. */
+    static void talksOnAChannel() throws Exception {
+        List<String> log = new CopyOnWriteArrayList<>();
+        List<byte[]> bodies = new CopyOnWriteArrayList<>();
+        List<String> states = new CopyOnWriteArrayList<>();
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread nvr = new Thread(() -> fakeTalkDoorbell(server, ABILITY, 0, log, bodies, true, 4));
+            nvr.start();
+            BaichuanTalk talk = new BaichuanTalk("127.0.0.1", server.getLocalPort(), BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, 4, states::add, 2000);
+            talk.start();
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> bodies.size() >= 2, 5000, "talk blocks on channel 5");
+            talk.stop();
+            nvr.join(3000);
+            check(log.contains("talk reset"), true);
+        }
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread nvr = new Thread(() -> fakeTalkDoorbell(server, ABILITY, 0, new CopyOnWriteArrayList<>(), new CopyOnWriteArrayList<>(), true, 4));
+            nvr.setDaemon(true);
+            nvr.start();
+            check(BaichuanTalk.probe("127.0.0.1", server.getLocalPort(), BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, 4) != null, true);
+        }
     }
 
     /** TalkAbility, TalkConfig, then 528-byte blocks in the app's layout carrying our audio, and a reset at the end. */
@@ -139,6 +163,11 @@ public final class BaichuanTalkTest {
 
     /** answerBlocks false: the doorbell goes quiet once talk is set up, as one that lost power does. */
     static void fakeTalkDoorbell(ServerSocket server, String ability, int busyFirst, List<String> log, List<byte[]> bodies, boolean answerBlocks) {
+        fakeTalkDoorbell(server, ability, busyFirst, log, bodies, answerBlocks, 0);
+    }
+
+    /** channel: the channel every request must name, in its extension, its header and TalkConfig (an NVR's camera). */
+    static void fakeTalkDoorbell(ServerSocket server, String ability, int busyFirst, List<String> log, List<byte[]> bodies, boolean answerBlocks, int channel) {
         try (Socket socket = server.accept()) {
             socket.setSoTimeout(3000);
             DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
@@ -149,13 +178,15 @@ public final class BaichuanTalkTest {
             while (true) {
                 BcMessage m = BcMessage.read(in);
                 String ext = new String(BcCrypto.aes(key, m.body, false), StandardCharsets.UTF_8);
-                check(ext.contains("<channelId>0</channelId>"), true);
+                check(ext.contains("<channelId>" + channel + "</channelId>"), true);
+                check(m.messageId & 0xFF, channel);
                 switch (m.command) {
                     case BaichuanTalk.CMD_TALK_ABILITY:
                         out.write(BaichuanClientTest.reply24(m.command, m.messageId, 200, BcCrypto.aes(key, ability.getBytes(StandardCharsets.UTF_8), true)));
                         break;
                     case BaichuanTalk.CMD_TALK_CONFIG: {
                         String xml = new String(BcCrypto.aes(key, m.payload, false), StandardCharsets.UTF_8);
+                        check(tag(xml, "channelId"), String.valueOf(channel));
                         log.add("talk config " + tag(xml, "audioType") + " " + tag(xml, "sampleRate") + " " + tag(xml, "lengthPerEncoder") + " "
                             + tag(xml, "duplex") + " " + tag(xml, "audioStreamMode"));
                         out.write(BaichuanClientTest.reply24(m.command, m.messageId, busy-- > 0 ? 422 : 200, new byte[0]));

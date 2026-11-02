@@ -261,6 +261,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         BaichuanClient[] self = new BaichuanClient[1];  // a replaced client can take up to its timeout to stop: ignore it
         BaichuanClient client = new BaichuanClient(s.host, 9000, s.username, s.password, new BaichuanClient.Listener() {
             private String logged = "";  // each change once: a doorbell that is away fails every few seconds
+            private final Set<Integer> otherChannels = new HashSet<>();  // presses on other channels, logged once each
 
             @Override public void onConnection(boolean connected, String detail) {
                 if (events != self[0]) return;
@@ -277,7 +278,15 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
             @Override public void onAlarm(AlarmEvents.Event event) {
                 RingController c = controller;
-                if (c == null || event.channel != 0 || events != self[0]) return;
+                if (c == null || events != self[0]) return;
+                int wanted = settings.channel;  // the current setting: a changed Channel needs no new session
+                if (event.channel != wanted) {
+                    // Another camera behind the same NVR, or a Channel setting that does not match: say which, once.
+                    if (event.visitor() && otherChannels.add(event.channel)) {
+                        log("events: a doorbell press on channel " + (event.channel + 1) + ", but Channel is set to " + (wanted + 1));
+                    }
+                    return;
+                }
                 if (event.visitor()) publishText("last_ring", texts.lastRingReading(), new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date()));
                 c.onVisitor(event.visitor());
             }
@@ -488,9 +497,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         Thread thread = new Thread(() -> {
             try {
                 h.setupResult(run, "running", t.checking());
-                ConnectionCheck.Result result = ConnectionCheck.run(s.host, 9000, 554, s.streamPath, s.videoPath, s.talkPath, s.username, s.password,
+                ConnectionCheck.Result result = ConnectionCheck.run(s.host, 9000, 554, s.streamPath, s.videoPath, s.talkPath, s.username, s.password, s.channel,
                     (path, listener) -> path.equals("RTSP") ? new StreamHub(s.host, 554, s.streamPath, s.username, s.password, listener)
-                        : new BaichuanStream(s.host, 9000, s.username, s.password, s.streamPath.endsWith("_sub"), listener),
+                        : new BaichuanStream(s.host, 9000, s.username, s.password, s.channel, s.streamPath.endsWith("_sub"), listener),
                     new ConnectionCheck.Player() {
                         @Override public Boolean canPlay(int width, int height) { return VideoRenderer.canPlay(width, height); }
                         @Override public Boolean decodes(byte[] keyframe) { return VideoRenderer.decodes(keyframe); }
@@ -543,7 +552,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private MediaStream openStream(Settings s, int generation) {
         if (rtspFirst(s)) return rtspStream(s, generation, false);
         final FallbackStream[] fallback = new FallbackStream[1];
-        BaichuanStream baichuan = new BaichuanStream(s.host, 9000, s.username, s.password, s.streamPath.endsWith("_sub"), state -> {
+        BaichuanStream baichuan = new BaichuanStream(s.host, 9000, s.username, s.password, s.channel, s.streamPath.endsWith("_sub"), state -> {
             if (!state.equals("connecting") && !state.equals("streaming")) log("video: " + state + " (Baichuan)");
             if (state.equals("streaming")) streamDelivers(generation);
             FallbackStream f = fallback[0];
@@ -632,7 +641,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         final int generation = ++talkGeneration;
         if (s.talkPath.equals("ONVIF") || (s.talkPath.equals("Automatic") && baichuanTalkRefused)) return onvifTalk(s, generation);
         final FallbackTalk[] fallback = new FallbackTalk[1];
-        BaichuanTalk baichuan = new BaichuanTalk(s.host, 9000, s.username, s.password, state -> {
+        BaichuanTalk baichuan = new BaichuanTalk(s.host, 9000, s.username, s.password, s.channel, state -> {
             if (!state.equals("connecting") && !state.equals("open")) log("talk: " + state);
             else if (state.equals("open")) log("talk: open over Baichuan");
             if (state.equals("open")) talkOpened(generation);
@@ -977,6 +986,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         final boolean chime, wakeScreen, wakeWordRestore, musicRestore, callMode, pushToTalk;
         final long autoCloseMillis, maxCallMillis;
         final int callVolume, chimeVolume;
+        final int channel;  // behind an NVR, the doorbell's channel there, counted from 0; 0 for a doorbell reached directly
         final List<Cards.Card> cards;
 
         Settings(Map<String, Object> values) {
@@ -1007,7 +1017,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             wakeWordRestore = Boolean.TRUE.equals(values.get("wakeWordRestore"));
             musicRestore = Boolean.TRUE.equals(values.get("musicRestore"));
             callMode = !Boolean.FALSE.equals(values.get("callMode"));
-            streamPath = string(values, "stream").startsWith("Sub") ? "/h264Preview_01_sub" : "/h264Preview_01_main";
+            Object number = values.get("channel");
+            channel = number instanceof Number ? Math.max(0, Math.min(98, ((Number) number).intValue() - 1)) : 0;
+            // RTSP counts channels from 01, as the Reolink app does: channel 2 behind an NVR is h264Preview_02_main.
+            streamPath = String.format(Locale.ROOT, "/h264Preview_%02d_", channel + 1) + (string(values, "stream").startsWith("Sub") ? "sub" : "main");
             Object volume = values.get("callVolume");
             callVolume = volume instanceof Number ? Math.max(0, Math.min(100, ((Number) volume).intValue())) : 70;
             cards = Cards.parse(values.get("cards"));

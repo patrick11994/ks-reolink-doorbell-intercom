@@ -63,15 +63,21 @@ final class ConnectionCheck {
     /** Always returns a result, so the settings page never stays on "Checking". */
     static Result run(String host, int baichuanPort, int rtspPort, String rtspPath, String videoPath, String talkPath, String username, String password,
                       Streams streams, Player player, Log log, Texts texts) {
+        return run(host, baichuanPort, rtspPort, rtspPath, videoPath, talkPath, username, password, 0, streams, player, log, texts);
+    }
+
+    /** channel: the doorbell's channel behind an NVR, counted from 0; 0 for a doorbell reached directly. */
+    static Result run(String host, int baichuanPort, int rtspPort, String rtspPath, String videoPath, String talkPath, String username, String password,
+                      int channel, Streams streams, Player player, Log log, Texts texts) {
         try {
-            return checks(host, baichuanPort, rtspPort, rtspPath, videoPath, talkPath, username, password, streams, player, log, texts);
+            return checks(host, baichuanPort, rtspPort, rtspPath, videoPath, talkPath, username, password, channel, streams, player, log, texts);
         } catch (RuntimeException error) {
             return new Result(false, texts.checkFailed(describe(error)));
         }
     }
 
     private static Result checks(String host, int baichuanPort, int rtspPort, String rtspPath, String videoPath, String talkPath, String username, String password,
-                                 Streams streams, Player player, Log log, Texts texts) {
+                                 int channel, Streams streams, Player player, Log log, Texts texts) {
         if (host.isEmpty() || username.isEmpty() || password.isEmpty()) return new Result(false, texts.checkNotConfigured());
         try {
             BaichuanClient.verify(host, baichuanPort, username, password);
@@ -125,7 +131,7 @@ final class ConnectionCheck {
 
         // Automatic probes Baichuan even when ONVIF is there: it talks over Baichuan first.
         boolean talks = talkPath.equals("ONVIF") ? onvifTalk
-            : baichuanTalk(host, baichuanPort, username, password) || (!talkPath.equals("Baichuan") && onvifTalk);
+            : baichuanTalk(host, baichuanPort, username, password, channel) || (!talkPath.equals("Baichuan") && onvifTalk);
         if (!talks) return new Result(false, talkPath.equals("Baichuan") ? texts.checkNoBaichuanTalk() : texts.checkNoTalk());
         return new Result(true, overRtspOnly ? texts.checkVideoOverRtsp() : texts.checkOk());
     }
@@ -173,9 +179,9 @@ final class ConnectionCheck {
         return texts.problemLost();
     }
 
-    private static boolean baichuanTalk(String host, int port, String username, String password) {
+    private static boolean baichuanTalk(String host, int port, String username, String password, int channel) {
         try {
-            return BaichuanTalk.probe(host, port, username, password) != null;
+            return BaichuanTalk.probe(host, port, username, password, channel) != null;
         } catch (IOException error) {
             return false;
         }
