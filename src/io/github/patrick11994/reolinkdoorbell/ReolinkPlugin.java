@@ -496,7 +496,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                         @Override public Boolean decodes(byte[] keyframe) { return VideoRenderer.decodes(keyframe); }
                     },
                     ReolinkPlugin.this::log, t);
-                h.setupResult(run, result.ok ? "success" : "error", result.message);
+                h.setupResult(run, result.ok ? "success" : "error", (result.ok ? "✓ " : "✗ ") + result.message);  // the outcome at a glance: Kiosk Satellite shows it as plain text
             } catch (RuntimeException | LinkageError gone) {
                 // The run or the session ended meanwhile.
             }
