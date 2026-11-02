@@ -122,7 +122,7 @@ public final class BaichuanStream implements MediaStream {
     private static final class Waited {
         private final int request;
         private final BcMediaParser parser;
-        private int answers;
+        private int answers, continuations;
         private long videoBytes;
         private int others;
         private final StringBuilder kinds = new StringBuilder();
@@ -132,9 +132,10 @@ public final class BaichuanStream implements MediaStream {
             this.parser = parser;
         }
 
-        void answer(BcMessage m) {
+        void answer(int bytes, boolean continuation) {
             answers++;
-            videoBytes += m.payload.length;
+            if (continuation) continuations++;
+            videoBytes += bytes;
         }
 
         void other(BcMessage m) {
@@ -143,7 +144,8 @@ public final class BaichuanStream implements MediaStream {
         }
 
         @Override public String toString() {
-            return answers + " answers to the preview " + idBytes(request) + " with " + videoBytes + " bytes: " + parser.summary() + "; "
+            return answers + " answers to the preview " + idBytes(request) + " (" + continuations + " without an extension) with " + videoBytes + " bytes: "
+                + parser.summary() + "; "
                 + others + " other messages" + (kinds.length() == 0 ? "" : ": " + kinds + (others > 5 ? ", …" : ""));
         }
 
@@ -193,7 +195,8 @@ public final class BaichuanStream implements MediaStream {
                 }
             });
             boolean streaming = false;
-            Waited waited = new Waited(id, parser);  // what came in before the first picture, for the log when none does
+            Waited waited = new Waited(id, parser);
+            boolean inPacket = false;  // a binaryData message came: messages without an extension carry more of it  // what came in before the first picture, for the log when none does
             long keyframeBy = System.nanoTime() / 1_000_000 + FIRST_KEYFRAME_MILLIS;
             boolean waiting = true;
             while (running) {
@@ -218,11 +221,28 @@ public final class BaichuanStream implements MediaStream {
                     if (waiting) waited.other(m);
                     continue;
                 }
-                if (m.statusOrEncryption != 200) throw new IOException("the doorbell answered the preview with " + m.statusOrEncryption);
-                if (waiting) waited.answer(m);
-                if (m.payload.length == 0) continue;
-                byte[] p = m.payload;
-                String ext = m.body.length == 0 ? "" : new String(BcCrypto.aes(s.aesKey(), m.body, false), StandardCharsets.UTF_8);
+                // A media packet starts in a message whose extension says binaryData, and may go on in messages without
+                // an extension: plain media from start to end. A doorbell reached directly gives every message an
+                // extension; an NVR does not, and dropping those cut every frame short (#6). Learned from reostream's
+                // protocol notes (AGPL-3.0); no code copied.
+                boolean continuation = !m.extended && inPacket;
+                if (!continuation && m.statusOrEncryption != 200) throw new IOException("the doorbell answered the preview with " + m.statusOrEncryption);
+                byte[] p;
+                String ext;
+                if (continuation) {
+                    p = m.body;
+                    ext = "";
+                } else {
+                    if (m.payload.length == 0) {
+                        if (waiting) waited.answer(0, false);
+                        continue;
+                    }
+                    p = m.payload;
+                    ext = m.body.length == 0 ? "" : new String(BcCrypto.aes(s.aesKey(), m.body, false), StandardCharsets.UTF_8);
+                    if (ext.contains("<binaryData>")) inPacket = true;
+                }
+                if (waiting) waited.answer(p.length, continuation);
+                if (p.length == 0) continue;
                 Matcher e = ENCRYPT_LEN.matcher(ext);
                 if (e.find()) {
                     int n = (int) Math.min(Long.parseLong(e.group(1)), p.length);

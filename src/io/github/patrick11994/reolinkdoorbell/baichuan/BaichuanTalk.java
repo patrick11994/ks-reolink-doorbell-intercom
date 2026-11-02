@@ -270,7 +270,7 @@ public final class BaichuanTalk implements TalkChannel {
             BcMessage m = BcMessage.read(s.in);
             if (m.command == command && m.messageId == id) {
                 if (m.body.length == 0) return m;
-                return new BcMessage(m.command, m.messageId, m.statusOrEncryption, m.messageClass, m.headerLength, BcCrypto.aes(s.aesKey(), m.body, false), m.payload);
+                return new BcMessage(m.command, m.messageId, m.statusOrEncryption, m.messageClass, m.headerLength, BcCrypto.aes(s.aesKey(), m.body, false), m.payload, m.extended);
             }
         }
     }
