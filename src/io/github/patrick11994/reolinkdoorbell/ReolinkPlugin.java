@@ -75,6 +75,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     // Automatic talk found that this doorbell refuses Baichuan talk: ONVIF straight away, until the settings change,
     // instead of losing 1-2.5 s on each talk start.
     private volatile boolean baichuanTalkRefused;
+    // The same for video: Automatic got its picture over RTSP after Baichuan brought none (through an NVR, #6), so it
+    // opens RTSP straight away, instead of waiting 2 s for Baichuan on every ring.
+    private volatile boolean baichuanVideoFailed;
     private MicCapture mic;
     private CallVolume callVolume;
     // The slider's level: updateSettings stores it for later sessions but does not call configure, so settings keeps
@@ -103,6 +106,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         Texts.setAssets(host::openAsset);  // the language files under assets/i18n
         settings = new Settings(values);
         baichuanTalkRefused = false;
+        baichuanVideoFailed = false;
         texts = Texts.of(settings.language);
         liveCallVolume = settings.callVolume;
         // Monotonic: a clock set after boot (no RTC battery, NTP) must not end a ring at once or stretch a call.
@@ -175,6 +179,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         Settings previous = settings;
         settings = new Settings(values);
         baichuanTalkRefused = false;
+        baichuanVideoFailed = false;
         texts = Texts.of(settings.language);
         liveCallVolume = settings.callVolume;
         RingController c = controller;
@@ -513,7 +518,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         Settings s = settings;
         if (stream != null || !s.configured() || stopped) return;
         ringAt = System.nanoTime() / 1_000_000;
-        log("media: start stream " + s.streamPath + " over " + (s.videoPath.equals("RTSP") ? "RTSP" : "Baichuan") + " (Video over: " + s.videoPath + ")");
+        log("media: start stream " + s.streamPath + " over " + (rtspFirst(s) ? "RTSP" : "Baichuan") + " (Video over: " + s.videoPath
+            + (rtspFirst(s) && s.videoPath.equals("Automatic") ? ", Baichuan brought no picture before" : "") + ")");
         publishText("first_frame", texts.firstPictureReading(), texts.waiting());
         reconnects = 0;
         decoderRestarts = 0;
@@ -535,7 +541,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
      * or Automatic: Baichuan, and RTSP if Baichuan fails before the first picture.
      */
     private MediaStream openStream(Settings s, int generation) {
-        if (s.videoPath.equals("RTSP")) return rtspStream(s, generation);
+        if (rtspFirst(s)) return rtspStream(s, generation, false);
         final FallbackStream[] fallback = new FallbackStream[1];
         BaichuanStream baichuan = new BaichuanStream(s.host, 9000, s.username, s.password, s.streamPath.endsWith("_sub"), state -> {
             if (!state.equals("connecting") && !state.equals("streaming")) log("video: " + state + " (Baichuan)");
@@ -553,14 +559,25 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             }
         });
         if (s.videoPath.equals("Baichuan")) return baichuan;
-        fallback[0] = new FallbackStream(baichuan, () -> rtspStream(s, generation));
+        fallback[0] = new FallbackStream(baichuan, () -> rtspStream(s, generation, true));
         return fallback[0];
     }
 
-    private MediaStream rtspStream(Settings s, int generation) {
+    /** RTSP by setting, or Automatic that found Baichuan brings no picture from this doorbell. */
+    private boolean rtspFirst(Settings s) {
+        return s.videoPath.equals("RTSP") || (s.videoPath.equals("Automatic") && baichuanVideoFailed);
+    }
+
+    /** fallback: opened because Baichuan brought no picture; once it delivers, Automatic goes to RTSP straight away. */
+    private MediaStream rtspStream(Settings s, int generation, boolean fallback) {
         return new StreamHub(s.host, 554, s.streamPath, s.username, s.password, state -> {
             if (!state.equals("connecting") && !state.equals("streaming")) log("video: " + state);
             if (state.equals("streaming")) streamDelivers(generation);
+            if (state.equals("streaming") && fallback && !baichuanVideoFailed) {
+                // Only once RTSP works: a doorbell that is away altogether fails both, and proves nothing about Baichuan.
+                baichuanVideoFailed = true;
+                log("video: RTSP from now on, until the plugin restarts or the settings change");
+            }
             if (state.startsWith("stream failed") || state.startsWith("stream ended")) {
                 showMessage(videoProblem(state));
                 if (!state.contains("H.265")) streamLost(generation);  // trying again does not change the codec
