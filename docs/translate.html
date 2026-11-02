@@ -90,6 +90,7 @@
   h3 { font-size: 1rem; margin: 20px 0 8px; }
   .how { margin: 0 0 16px; padding-left: 1.4em; }
   .how li { margin-bottom: 6px; }
+  kbd { font: .85em ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--field); }
   .muted { color: var(--muted); font-size: .9rem; }
   .action-status { font-size: .9rem; color: var(--ok); margin: 8px 0 0; }
   .hidden { display: none !important; }
@@ -154,7 +155,7 @@
       <h3>Send it in</h3>
       <ol class="how">
         <li>Press <b>Copy and open issue</b>. Your translation is copied, and GitHub's form for translations opens in a new tab, with the language already filled in.</li>
-        <li>Click in the box <b>The file</b> and paste (Ctrl+V, or ⌘V on a Mac).</li>
+        <li id="paste-step">Click in the box <b>The file</b> and paste with <kbd>Ctrl</kbd>+<kbd>V</kbd>.</li>
         <li>Press <b>Submit new issue</b>. That's it: the translation comes in the next release.</li>
       </ol>
       <p><button id="copy" class="primary" type="button">Copy and open issue</button></p>
@@ -403,7 +404,26 @@
       : (name || code);
   }
 
+  /** How to paste on this device: the keys on a computer, a long press on a phone or tablet. */
+  function pasteHow() {
+    const ua = navigator.userAgent || '';
+    const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+    const touchOnly = /Android|iPhone|iPad|iPod/i.test(ua) || (/Mac/i.test(platform) && navigator.maxTouchPoints > 1);  // an iPad asks for the desktop site
+    const li = $('paste-step');
+    li.textContent = '';
+    if (touchOnly) {
+      li.append('Tap and hold in the box ', bold('The file'), ', then choose ', bold('Paste'), '.');
+      return;
+    }
+    const mac = /Mac|iPhone|iPad/i.test(platform) || /Mac OS X/.test(ua);
+    li.append('Click in the box ', bold('The file'), ' and paste with ', key(mac ? '⌘' : 'Ctrl'), (mac ? '' : '+'), key('V'), '.');
+  }
+
+  function bold(text) { const b = document.createElement('b'); b.textContent = text; return b; }
+  function key(text) { const k = document.createElement('kbd'); k.textContent = text; return k; }
+
   function summary() {
+    pasteHow();
     const c = counts();
     $('summary').textContent = (name || code) + ': ' + c.done + ' of ' + c.total + ' texts done.';
     const left = [];
