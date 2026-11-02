@@ -32,6 +32,7 @@
   button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px; padding: 8px 16px; cursor: pointer; }
   button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   button.small { padding: 4px 12px; font-size: .875rem; }
+  button:disabled { opacity: .4; cursor: default; }
   .progress { margin-top: 16px; }
   .bar { height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; }
   .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
@@ -55,6 +56,22 @@
   .code-hint { margin: 10px 0 0; font-size: .9rem; }
   .code-hint.bad { color: var(--bad); }
   .code-hint.good { color: var(--ok); }
+  .steps { list-style: none; display: flex; gap: 8px; padding: 0; margin: 0 0 16px; flex-wrap: wrap; }
+  .steps li { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: .95rem; }
+  .steps li + li::before { content: ''; width: 24px; height: 1px; background: var(--line); }
+  .steps span { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); font-size: .85rem; }
+  .steps li.current { color: var(--text); font-weight: 600; }
+  .steps li.current span { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  .steps li.done span { border-color: var(--accent); color: var(--accent); }
+  .intro { margin: 0 0 12px; }
+  .draft-line { margin: 12px 0 0; font-size: .9rem; color: var(--muted); }
+  .summary { font-size: 1.05rem; margin: 0 0 8px; }
+  .summary-left { color: var(--todo); margin: 0 0 8px; }
+  h3 { font-size: 1rem; margin: 20px 0 8px; }
+  .how { margin: 0 0 16px; padding-left: 1.4em; }
+  .how li { margin-bottom: 6px; }
+  .muted { color: var(--muted); font-size: .9rem; }
+  .action-status { font-size: .9rem; color: var(--ok); margin: 8px 0 0; }
   .hidden { display: none !important; }
   @media (max-width: 680px) { .row { grid-template-columns: 1fr; } }
 </style>
@@ -64,40 +81,71 @@
   <h1>Translate Reolink Doorbell Intercom</h1>
   <p class="lead">Translate the texts on the call screen, the status and the Check button. Your work stays in this browser until you send it in an issue; nothing is uploaded.</p>
 
-  <div class="panel">
-    <div class="setup">
-      <label>Language
-        <select id="language"></select>
-      </label>
-      <label id="new-code-field" class="hidden">Which language
-        <input id="new-code" list="known-languages" placeholder="Search, or a code such as de" size="24" autocomplete="off" spellcheck="false">
-        <datalist id="known-languages"></datalist>
-      </label>
-      <label id="new-name-field" class="hidden">Its name, in that language
-        <input id="new-name" placeholder="Deutsch" size="18" autocomplete="off">
-      </label>
-      <button id="discard" class="small hidden" type="button">Start over</button>
+  <ol class="steps" aria-label="Steps">
+    <li data-step="1"><span>1</span> Language</li>
+    <li data-step="2"><span>2</span> Translate</li>
+    <li data-step="3"><span>3</span> Send</li>
+  </ol>
+
+  <section id="step-1">
+    <div class="panel">
+      <p class="intro">Which language do you want to translate into? Pick one that is already started, or a new one.</p>
+      <div class="setup">
+        <label>Language
+          <select id="language"></select>
+        </label>
+        <label id="new-code-field" class="hidden">Which language
+          <input id="new-code" list="known-languages" placeholder="Search, or a code such as de" size="24" autocomplete="off" spellcheck="false">
+          <datalist id="known-languages"></datalist>
+        </label>
+        <label id="new-name-field" class="hidden">Its name, in that language
+          <input id="new-name" placeholder="Deutsch" size="18" autocomplete="off">
+        </label>
+      </div>
+      <p id="code-hint" class="code-hint hidden" aria-live="polite"></p>
+      <p id="draft-line" class="draft-line hidden"><span id="draft-note"></span> <button id="discard" class="small" type="button">Start over</button></p>
     </div>
-    <p id="code-hint" class="code-hint hidden" aria-live="polite"></p>
-    <div class="progress">
-      <div class="bar" role="progressbar" aria-label="Translated" aria-valuemin="0" aria-valuemax="100"><div id="bar"></div></div>
-      <div class="progress-text"><span id="progress"></span><span id="draft-note"></span></div>
+  </section>
+
+  <section id="step-2" class="hidden">
+    <div class="panel">
+      <p class="intro">Translate each text in the box next to it. The grey line under a text says where it appears. Your work is saved in this browser as you type, so you can stop and come back later.</p>
+      <div class="progress">
+        <div class="bar" role="progressbar" aria-label="Translated" aria-valuemin="0" aria-valuemax="100"><div id="bar"></div></div>
+        <div class="progress-text"><span id="progress"></span></div>
+      </div>
+      <div class="filter" role="radiogroup" aria-label="Show">
+        <label><input type="radio" name="show" value="work" checked> Only what needs work</label>
+        <label><input type="radio" name="show" value="all"> Everything</label>
+      </div>
     </div>
-    <div class="filter" role="radiogroup" aria-label="Show">
-      <label><input type="radio" name="show" value="work" checked> Only what needs work</label>
-      <label><input type="radio" name="show" value="all"> Everything</label>
+    <div id="sections"></div>
+  </section>
+
+  <section id="step-3" class="hidden">
+    <div class="panel">
+      <p id="summary" class="summary"></p>
+      <p id="summary-left" class="summary-left hidden"></p>
+      <h3>Send it in</h3>
+      <ol class="how">
+        <li>Press <b>Copy and open issue</b>. Your translation is copied, and GitHub's form for translations opens in a new tab, with the language already filled in.</li>
+        <li>Click in the box <b>The file</b> and paste (Ctrl+V, or ⌘V on a Mac).</li>
+        <li>Press <b>Submit new issue</b>. That's it: the translation comes in the next release.</li>
+      </ol>
+      <p><button id="copy" class="primary" type="button">Copy and open issue</button></p>
+      <p class="muted">Sending an issue needs a free GitHub account. Rather attach a file? <button id="download" class="small" type="button">Download</button> saves it as a .txt file you can attach to the issue instead.</p>
+      <p id="action-status" class="action-status" aria-live="polite"></p>
     </div>
-  </div>
+  </section>
 
   <p id="load-error" class="error hidden"></p>
-  <div id="sections"></div>
 </main>
 
 <div class="actions">
   <div class="inner">
-    <span class="status" id="action-status">Download the file, or copy it and paste it into a translation issue.</span>
-    <button id="download" type="button">Download</button>
-    <button id="copy" class="primary" type="button">Copy and open issue</button>
+    <button id="back" type="button">Back</button>
+    <span class="status" id="nav-status"></span>
+    <button id="next" class="primary" type="button">Next</button>
   </div>
 </div>
 
@@ -197,6 +245,7 @@
       hint.textContent = 'Choose a language above, or "A new language…" with its code and name, to see the texts.';
       root.append(hint);
       $('progress').textContent = ''; $('bar').style.width = '0';
+      nav();
       return;
     }
     let panel = null, heading = null, rows = 0, sectionRows = 0;
@@ -281,7 +330,61 @@
     $('bar').style.width = percent + '%';
     document.querySelector('.bar').setAttribute('aria-valuenow', percent);
     $('progress').textContent = done + ' of ' + keys.length + ' texts done (' + percent + '%)';
+    nav();
   }
+
+  // The wizard: 1 Language, 2 Translate, 3 Send.
+  let step = 1;
+
+  function counts() {
+    const keys = english.filter(x => x.key).map(x => x.key);
+    const missing = keys.filter(k => !entries[k] || !entries[k].value.trim()).length;
+    const changed = keys.filter(k => entries[k] && entries[k].value.trim() && entries[k].outdated && !entries[k].reviewed).length;
+    const broken = keys.filter(k => problems(k).length > 0).length;
+    return { total: keys.length, done: keys.filter(k => !needsWork(k)).length, missing, changed, broken };
+  }
+
+  function goto(n) {
+    step = n;
+    for (let i = 1; i <= 3; i++) {
+      $('step-' + i).classList.toggle('hidden', i !== n);
+      const li = document.querySelector('.steps li[data-step="' + i + '"]');
+      li.classList.toggle('current', i === n);
+      li.classList.toggle('done', i < n);
+      if (i === n) li.setAttribute('aria-current', 'step'); else li.removeAttribute('aria-current');
+    }
+    if (n === 2) render();
+    if (n === 3) summary();
+    $('action-status').textContent = '';
+    nav();
+    window.scrollTo(0, 0);
+  }
+
+  function nav() {
+    $('back').classList.toggle('hidden', step === 1);
+    $('next').classList.toggle('hidden', step === 3);
+    $('next').textContent = step === 1 ? 'Next: translate' : 'Next: send it in';
+    $('next').disabled = step === 1 && !code;
+    const c = counts();
+    $('nav-status').textContent = step === 1 ? (code ? (name || code) : 'Choose a language to start.')
+      : step === 2 ? c.done + ' of ' + c.total + ' done' + (c.done === c.total ? ': all set!' : '')
+      : (name || code);
+  }
+
+  function summary() {
+    const c = counts();
+    $('summary').textContent = (name || code) + ': ' + c.done + ' of ' + c.total + ' texts done.';
+    const left = [];
+    if (c.missing) left.push(c.missing + (c.missing === 1 ? ' text is' : ' texts are') + ' not translated yet, and will show in English');
+    if (c.changed) left.push(c.changed + (c.changed === 1 ? ' text has' : ' texts have') + ' changed English to check');
+    if (c.broken) left.push(c.broken + (c.broken === 1 ? ' text has' : ' texts have') + ' a problem marked in red, which would show wrong on the screen: please fix ' + (c.broken === 1 ? 'it' : 'them') + ' first');
+    const p = $('summary-left');
+    p.textContent = left.length ? left.join('; ') + '. You can send what you have now, or go back and finish it.' : '';
+    p.classList.toggle('hidden', !left.length);
+  }
+
+  $('next').addEventListener('click', () => { if (step === 1 && code) goto(2); else if (step === 2) goto(3); });
+  $('back').addEventListener('click', () => goto(Math.max(1, step - 1)));
 
   /** The file, in the layout the repository's tools/translations.py reads and writes. */
   function file() {
@@ -298,7 +401,7 @@
   }
 
   function ready() {
-    if (!code) { $('action-status').textContent = 'Choose a language first.'; return false; }
+    if (!code) { goto(1); return false; }
     return true;
   }
 
@@ -396,8 +499,8 @@
     const issue = REPO + '/issues/new?template=translation.yml&title=' + encodeURIComponent('Translation: ' + (name || code))
       + '&language=' + encodeURIComponent((name || code) + ' (' + code + ')');
     window.open(issue, '_blank', 'noopener');
-    $('action-status').textContent = copied ? 'Copied. Paste it into "The file" in the issue that just opened.'
-      : 'Copying was not allowed here: use Download and attach the file instead.';
+    $('action-status').textContent = copied ? 'Copied! Now paste it into "The file" in the GitHub tab that just opened, and submit.'
+      : 'This browser did not allow copying: use Download, and attach the file to the issue instead.';
   });
 
   async function choose(value) {
@@ -408,7 +511,7 @@
     $('code-hint').classList.add('hidden');
     if (isNew) { newLanguage(); return; }
     code = value; name = names[value] || value; entries = {};
-    if (!code) { $('draft-note').textContent = ''; $('discard').classList.add('hidden'); render(); return; }  // Choose…
+    if (!code) { $('draft-note').textContent = ''; $('draft-line').classList.add('hidden'); render(); return; }  // Choose…
     try { entries = parseLanguage(await fetchText('assets/i18n/' + code + '.properties')); }
     catch (e) { entries = {}; showError('Could not load ' + code + '.properties (' + e.message + ').'); }
     loadDraft(false);
@@ -427,12 +530,12 @@
           entries[k] = { value: v.value, outdated: base ? base.outdated : false, was: base ? base.was : null, reviewed: !!v.reviewed };
         }
         if (isNew && saved.name) { name = saved.name; $('new-name').value = saved.name; nameTyped = true; }
-        $('draft-note').textContent = 'Your earlier work in this browser is back';
+        $('draft-note').textContent = 'Your earlier work on this language in this browser is back.';
       } catch (e) { /* a broken draft: start from the repository */ }
     } else {
       $('draft-note').textContent = '';
     }
-    $('discard').classList.toggle('hidden', !draft);
+    $('draft-line').classList.toggle('hidden', !draft);
   }
 
   function showError(text) { const p = $('load-error'); p.textContent = text; p.classList.remove('hidden'); }
@@ -457,7 +560,7 @@
     const fresh = document.createElement('option'); fresh.value = '__new'; fresh.textContent = 'A new language…'; select.append(fresh);
     fillSuggestions();
     const wanted = params.get('lang');
-    if (wanted && names[wanted]) { select.value = wanted; choose(wanted); } else render();
+    if (wanted && names[wanted]) { select.value = wanted; await choose(wanted); goto(2); } else goto(1);
   })();
 })();
 </script>
