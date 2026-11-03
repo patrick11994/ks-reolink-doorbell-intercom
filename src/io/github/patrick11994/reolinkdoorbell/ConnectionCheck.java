@@ -55,8 +55,11 @@ final class ConnectionCheck {
         void line(String text);
     }
 
-    /** How long a stream may take to its first picture: Baichuan brings one in about 0.3 s, RTSP within a GOP. */
-    static final long PICTURE_MILLIS = 5_000;
+    /**
+     * How long a stream may take to its first picture: Baichuan brings one in about 0.3 s, RTSP within a GOP, and a
+     * battery doorbell behind a Home Hub once it is awake, about 12 s (#9).
+     */
+    static final long PICTURE_MILLIS = 18_000;
 
     private ConnectionCheck() {}
 

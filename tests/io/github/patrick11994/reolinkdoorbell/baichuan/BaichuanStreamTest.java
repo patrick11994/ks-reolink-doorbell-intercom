@@ -25,6 +25,7 @@ public final class BaichuanStreamTest {
         anNvrGoesByTheHeader();
         anNvrSplitsFramesOverMessages();
         aChannelBehindAnNvr();
+        aWakingDoorbellGetsTime();
         System.out.println("BaichuanStreamTest passed");
     }
 
@@ -202,6 +203,47 @@ public final class BaichuanStreamTest {
             check(seen.contains("video 3004 key"), true);
             stream.stop();
             nvr.join(3000);
+        }
+    }
+
+    /**
+     * A battery doorbell behind a Home Hub (#9): the hub answers the preview with the stream's info at once, and the
+     * picture follows only once the doorbell is awake. Past the first deadline, the stream waits for it instead of
+     * failing, and says so.
+     */
+    static void aWakingDoorbellGetsTime() throws Exception {
+        List<String> states = new CopyOnWriteArrayList<>();
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread hub = new Thread(() -> {
+                try (Socket socket = server.accept()) {
+                    socket.setSoTimeout(8000);
+                    DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+                    OutputStream out = socket.getOutputStream();
+                    byte[] key = BaichuanClientTest.fakeLogin(in, out, BaichuanClientTest.PASSWORD, new ArrayList<>());
+                    if (key == null) return;
+                    while (true) {
+                        BcMessage m = BcMessage.read(in);
+                        if (m.command != BaichuanStream.CMD_PREVIEW) continue;
+                        send(out, m.messageId, key, info(1024, 1024, 15), -1);
+                        out.flush();
+                        Thread.sleep(BaichuanStream.FIRST_KEYFRAME_MILLIS + 1500);  // waking up
+                        send(out, m.messageId, key, video("00dc", annexB(5, 100), 0), -1);
+                        out.flush();
+                    }
+                } catch (Exception closed) {
+                    // The stream stopped.
+                }
+            });
+            hub.start();
+            BaichuanStream stream = new BaichuanStream("127.0.0.1", server.getLocalPort(), BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, true, states::add, 2000);
+            stream.start();
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> stream.firstKeyframeMillis() >= 0 || states.stream().anyMatch(x -> x.startsWith("stream failed")), 8000,
+                "the waking doorbell's picture");
+            stream.stop();
+            hub.join(3000);
+            check(stream.firstKeyframeMillis() >= BaichuanStream.FIRST_KEYFRAME_MILLIS, true);
+            check(states.stream().anyMatch(x -> x.startsWith("waiting up to 15 s for the doorbell to wake up")), true);
+            check(states.stream().noneMatch(x -> x.startsWith("stream failed")), true);
         }
     }
 

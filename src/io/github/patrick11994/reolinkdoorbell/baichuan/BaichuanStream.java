@@ -19,6 +19,13 @@ public final class BaichuanStream implements MediaStream {
     static final int CMD_PREVIEW = 3, CMD_PREVIEW_STOP = 4;
     /** newestIFrame brings a keyframe in about 0.2 s: one that has not come by now will not, so Automatic falls back. */
     static final int FIRST_KEYFRAME_MILLIS = 2_000;
+    /**
+     * A battery doorbell behind a Reolink Home Hub answers the preview at once but sends its first picture only once it
+     * is awake, about 12 s later (#9): a doorbell that answered by FIRST_KEYFRAME_MILLIS gets this long instead. One
+     * that did not answer at all still fails at FIRST_KEYFRAME_MILLIS, so Automatic falls back to RTSP as quickly as
+     * before. Learned from DevFlorian's patch.
+     */
+    static final int WAKING_KEYFRAME_MILLIS = 15_000;
     private static final Pattern ENCRYPT_LEN = Pattern.compile("<encryptLen>(\\d+)</encryptLen>");
 
     private final String host, username, password;
@@ -138,6 +145,11 @@ public final class BaichuanStream implements MediaStream {
         private int others;
         private final StringBuilder kinds = new StringBuilder();
 
+        /** The doorbell answered the preview itself, even if only with the stream's info. */
+        boolean answered() {
+            return answers > 0;
+        }
+
         Waited(int request, BcMediaParser parser) {
             this.request = request;
             this.parser = parser;
@@ -208,7 +220,8 @@ public final class BaichuanStream implements MediaStream {
             boolean streaming = false;
             Waited waited = new Waited(id, parser);
             boolean inPacket = false;  // a binaryData message came: messages without an extension carry more of it  // what came in before the first picture, for the log when none does
-            long keyframeBy = System.nanoTime() / 1_000_000 + FIRST_KEYFRAME_MILLIS;
+            long started = System.nanoTime() / 1_000_000;
+            long limit = FIRST_KEYFRAME_MILLIS;  // WAKING_KEYFRAME_MILLIS once the doorbell answered without a picture
             boolean waiting = true;
             while (running) {
                 // Until the first keyframe, the read may only wait as long as the keyframe deadline leaves: a doorbell
@@ -217,15 +230,20 @@ public final class BaichuanStream implements MediaStream {
                     waiting = false;
                     s.socket.setSoTimeout(timeoutMillis);
                 } else if (waiting) {
-                    long left = keyframeBy - System.nanoTime() / 1_000_000;
-                    if (left <= 0) throw new IOException("no picture within " + FIRST_KEYFRAME_MILLIS + " ms (" + waited + ")");
+                    long left = started + limit - System.nanoTime() / 1_000_000;
+                    if (left <= 0 && limit == FIRST_KEYFRAME_MILLIS && waited.answered()) {
+                        limit = WAKING_KEYFRAME_MILLIS;
+                        left = started + limit - System.nanoTime() / 1_000_000;
+                        listener.onStreamState("waiting up to " + WAKING_KEYFRAME_MILLIS / 1000 + " s for the doorbell to wake up (" + waited + ")");
+                    }
+                    if (left <= 0) throw new IOException("no picture within " + limit + " ms (" + waited + ")");
                     s.socket.setSoTimeout((int) left);
                 }
                 BcMessage m;
                 try {
                     m = BcMessage.read(s.in);
                 } catch (java.net.SocketTimeoutException quiet) {
-                    if (waiting) throw new IOException("no picture within " + FIRST_KEYFRAME_MILLIS + " ms (" + waited + ")");
+                    if (waiting) continue;  // the deadline above decides: wait longer for a waking doorbell, or give up
                     throw quiet;
                 }
                 if (m.command != CMD_PREVIEW || m.messageId != id) {
