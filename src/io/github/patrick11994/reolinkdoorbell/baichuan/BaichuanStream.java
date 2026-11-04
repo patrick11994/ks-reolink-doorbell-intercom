@@ -20,10 +20,12 @@ public final class BaichuanStream implements MediaStream {
     /** newestIFrame brings a keyframe in about 0.2 s: one that has not come by now will not, so Automatic falls back. */
     static final int FIRST_KEYFRAME_MILLIS = 2_000;
     /**
-     * A battery doorbell behind a Reolink Home Hub answers the preview at once but sends its first picture only once it
-     * is awake, about 12 s later (#9): a doorbell that answered by FIRST_KEYFRAME_MILLIS gets this long instead. One
-     * that did not answer at all still fails at FIRST_KEYFRAME_MILLIS, so Automatic falls back to RTSP as quickly as
-     * before. Learned from DevFlorian's patch.
+     * A battery doorbell behind a Reolink Home Hub sends its first picture only once it is awake, about 9 to 12 s after
+     * the preview (#9). It gets this long instead of FIRST_KEYFRAME_MILLIS when the preview was answered (the hub sends
+     * the stream's info at once while the doorbell is still half awake), or when the login said it is a recorder (a
+     * hub with the doorbell deep asleep answers nothing at first). A doorbell reached directly that does not answer
+     * still fails at FIRST_KEYFRAME_MILLIS, so Automatic falls back to RTSP as quickly as before. Learned from
+     * DevFlorian's patch and logs.
      */
     static final int WAKING_KEYFRAME_MILLIS = 15_000;
     private static final Pattern ENCRYPT_LEN = Pattern.compile("<encryptLen>(\\d+)</encryptLen>");
@@ -231,12 +233,16 @@ public final class BaichuanStream implements MediaStream {
                     s.socket.setSoTimeout(timeoutMillis);
                 } else if (waiting) {
                     long left = started + limit - System.nanoTime() / 1_000_000;
-                    if (left <= 0 && limit == FIRST_KEYFRAME_MILLIS && waited.answered()) {
+                    if (left <= 0 && limit == FIRST_KEYFRAME_MILLIS && (waited.answered() || s.recorder())) {
                         limit = WAKING_KEYFRAME_MILLIS;
                         left = started + limit - System.nanoTime() / 1_000_000;
-                        listener.onStreamState("waiting up to " + WAKING_KEYFRAME_MILLIS / 1000 + " s for the doorbell to wake up (" + waited + ")");
+                        listener.onStreamState("waiting up to " + WAKING_KEYFRAME_MILLIS / 1000 + " s for the doorbell to wake up"
+                            + (s.recorder() ? " behind the " + s.deviceType() : "") + " (" + waited + ")");
                     }
-                    if (left <= 0) throw new IOException("no picture within " + limit + " ms (" + waited + ")");
+                    if (left <= 0) {
+                        String type = s.deviceType().isEmpty() ? "" : ", from a " + s.deviceType();  // which device: a hub waits longer
+                        throw new IOException("no picture within " + limit + " ms (" + waited + type + ")");
+                    }
                     s.socket.setSoTimeout((int) left);
                 }
                 BcMessage m;

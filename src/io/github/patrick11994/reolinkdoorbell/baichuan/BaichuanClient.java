@@ -36,6 +36,7 @@ public final class BaichuanClient {
     private static final Pattern NONCE = Pattern.compile("<nonce>([^<]+)</nonce>");
     private static final boolean TRACE = Boolean.getBoolean("baichuan.trace");  // -Dbaichuan.trace=true for the Mac-side live check
     private static final Pattern SIG_VER = Pattern.compile("<sigVer>([^<]+)</sigVer>");
+    private static final Pattern DEVICE_TYPE = Pattern.compile("<DeviceInfo[^>]*>.*?<type>([^<]*)</type>", Pattern.DOTALL);
     private static final long MAX_RETRY = 8_000;
 
     private final String host;
@@ -50,6 +51,7 @@ public final class BaichuanClient {
     private Thread thread;
     private int counter;
     private byte[] aesKey;
+    private volatile String deviceType = "";  // from the login reply's DeviceInfo, lower case; empty if it had none
     private long connectedSince;
     private volatile long checkAsked;  // when checkNow() asked, on the session's clock; 0 never
     long firstRetry = 2_000;  // set before start(); tests shorten it
@@ -239,6 +241,17 @@ public final class BaichuanClient {
             return client.nextId(channel);
         }
 
+        /** What answered the login, from its DeviceInfo: "ipc", "nvr", "wifi_nvr", "homehub", or empty if it did not say. */
+        String deviceType() {
+            return client.deviceType;
+        }
+
+        /** An NVR or Home Hub: the doorbell is behind it, and a battery doorbell there may first have to wake up. */
+        boolean recorder() {
+            String type = client.deviceType;
+            return type.equals("nvr") || type.equals("wifi_nvr") || type.equals("homehub");
+        }
+
         /** The id for a stream's messages (Preview and its stop): see BaichuanClient.streamId. */
         synchronized int streamId(int channel, int stream, int handle) {
             return client.streamId(channel, stream, handle);
@@ -281,6 +294,14 @@ public final class BaichuanClient {
         BcMessage loginReply = await(in, CMD_LOGIN, loginId);
         if (loginReply.headerLength == 24 && loginReply.statusOrEncryption == 401) throw new LoginRefused("the doorbell refused the username or password");
         if (loginReply.headerLength == 24 && loginReply.statusOrEncryption != 200) throw new IOException("login failed with status " + loginReply.statusOrEncryption);
+        // The reply's DeviceInfo names what answered: "ipc" for a camera, "nvr", "wifi_nvr" or "homehub" for a recorder
+        // with cameras behind it (as reolink_aio reads it). Only a hint: a reply without it is taken as a camera.
+        try {
+            Matcher type = DEVICE_TYPE.matcher(decode(loginReply, true));
+            deviceType = type.find() ? type.group(1).trim().toLowerCase(java.util.Locale.ROOT) : "";
+        } catch (RuntimeException unreadable) {
+            deviceType = "";
+        }
     }
 
     /** Reads until the reply to (command, id) arrives; pushes that arrive meanwhile are delivered. */

@@ -26,6 +26,8 @@ public final class BaichuanStreamTest {
         anNvrSplitsFramesOverMessages();
         aChannelBehindAnNvr();
         aWakingDoorbellGetsTime();
+        aSleepingDoorbellBehindAHubGetsTime();
+        aSilentDoorbellStillFailsFast();
         System.out.println("BaichuanStreamTest passed");
     }
 
@@ -244,6 +246,60 @@ public final class BaichuanStreamTest {
             check(stream.firstKeyframeMillis() >= BaichuanStream.FIRST_KEYFRAME_MILLIS, true);
             check(states.stream().anyMatch(x -> x.startsWith("waiting up to 15 s for the doorbell to wake up")), true);
             check(states.stream().noneMatch(x -> x.startsWith("stream failed")), true);
+        }
+    }
+
+    /**
+     * A battery doorbell deep asleep behind a Home Hub (#9): the hub sends nothing at all for seconds, not even the
+     * stream's info. The login said homehub, so the stream waits for the picture instead of failing at 2 s.
+     */
+    static void aSleepingDoorbellBehindAHubGetsTime() throws Exception {
+        List<String> states = new CopyOnWriteArrayList<>();
+        BaichuanStream stream = silentThenPicture("<body>\n<DeviceInfo version=\"1.1\">\n<type>homehub</type>\n<typeInfo>HOMEHUB</typeInfo>\n<channelNum>8</channelNum>\n</DeviceInfo>\n</body>\n",
+            BaichuanStream.FIRST_KEYFRAME_MILLIS + 1500, states);
+        check(stream.firstKeyframeMillis() >= BaichuanStream.FIRST_KEYFRAME_MILLIS, true);
+        check(states.stream().anyMatch(x -> x.startsWith("waiting up to 15 s for the doorbell to wake up behind the homehub")), true);
+    }
+
+    /** The same silence from a doorbell reached directly still fails at 2 s, so Automatic falls back to RTSP quickly. */
+    static void aSilentDoorbellStillFailsFast() throws Exception {
+        List<String> states = new CopyOnWriteArrayList<>();
+        BaichuanStream stream = silentThenPicture("<body>\n<DeviceInfo version=\"1.1\">\n<type>ipc</type>\n</DeviceInfo>\n</body>\n",
+            BaichuanStream.FIRST_KEYFRAME_MILLIS + 1500, states);
+        check(stream.firstKeyframeMillis(), -1L);
+        check(states.stream().anyMatch(x -> x.startsWith("stream failed: no picture within 2000 ms")), true);
+    }
+
+    /** A device that logs in with deviceInfo, answers the preview with nothing for silentMillis, then info and a picture. */
+    private static BaichuanStream silentThenPicture(String deviceInfo, long silentMillis, List<String> states) throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread device = new Thread(() -> {
+                try (Socket socket = server.accept()) {
+                    socket.setSoTimeout(8000);
+                    DataInputStream in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
+                    OutputStream out = socket.getOutputStream();
+                    byte[] key = BaichuanClientTest.fakeLogin(in, out, BaichuanClientTest.PASSWORD, new ArrayList<>(), deviceInfo);
+                    if (key == null) return;
+                    while (true) {
+                        BcMessage m = BcMessage.read(in);
+                        if (m.command != BaichuanStream.CMD_PREVIEW) continue;
+                        Thread.sleep(silentMillis);  // asleep: not even the stream's info
+                        send(out, m.messageId, key, info(1024, 1024, 15), -1);
+                        send(out, m.messageId, key, video("00dc", annexB(5, 100), 0), -1);
+                        out.flush();
+                    }
+                } catch (Exception closed) {
+                    // The stream stopped or gave up.
+                }
+            });
+            device.start();
+            BaichuanStream stream = new BaichuanStream("127.0.0.1", server.getLocalPort(), BaichuanClientTest.USER, BaichuanClientTest.PASSWORD, true, states::add, 2000);
+            stream.start();
+            io.github.patrick11994.reolinkdoorbell.Await.until(() -> stream.firstKeyframeMillis() >= 0 || states.stream().anyMatch(x -> x.startsWith("stream failed")), 8000,
+                "a picture or a failure");
+            stream.stop();
+            device.join(3000);
+            return stream;
         }
     }
 

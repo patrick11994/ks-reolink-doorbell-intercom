@@ -340,6 +340,11 @@ public final class BaichuanClientTest {
 
     /** The doorbell's side of the nonce and the login; returns the session's AES key, or null after refusing it. */
     static byte[] fakeLogin(DataInputStream in, OutputStream out, String realPassword, List<String> log) throws IOException {
+        return fakeLogin(in, out, realPassword, log, "<body><DeviceInfo/></body>");
+    }
+
+    /** deviceInfo: the login reply's body, such as a Home Hub's DeviceInfo with type homehub. */
+    static byte[] fakeLogin(DataInputStream in, OutputStream out, String realPassword, List<String> log, String deviceInfo) throws IOException {
         {
             BcMessage nonceRequest = BcMessage.read(in);
             String nonceXml = "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n<body>\n<Encryption version=\"1.1\">\n<type>md5</type>\n<nonce>" + NONCE + "</nonce>\n</Encryption>\n</body>\n";
@@ -354,7 +359,7 @@ public final class BaichuanClientTest {
                 return null;
             }
             log.add("login ok");
-            out.write(reply24(1, login.messageId, 200, BcCrypto.xor("<body><DeviceInfo/></body>".getBytes(StandardCharsets.UTF_8), login.channelByte())));
+            out.write(reply24(1, login.messageId, 200, BcCrypto.xor(deviceInfo.getBytes(StandardCharsets.UTF_8), login.channelByte())));
             out.flush();
             return BcCrypto.aesKey(NONCE, realPassword);
         }
