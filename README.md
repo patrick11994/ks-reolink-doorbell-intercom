@@ -107,7 +107,15 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | **Test ring** | Does what a real press does |
 | **Close** | Closes the call screen |
 
-**Trigger:** **Doorbell pressed**, for Gestures.
+**Triggers**, for Gestures:
+
+| Trigger | When |
+|---|---|
+| **Doorbell pressed** | Someone presses the doorbell |
+| **Call screen opened** | The call screen opens, after a ring or by hand |
+| **Call screen closed** | The call screen closes, however it closes |
+| **Answered** | Someone answers a ring: Answer, or the first hold of Talk |
+| **Missed ring** | A ring closes by itself after **Close the viewer after**, without anyone pressing Speaker or Answer |
 
 ### Cards
 

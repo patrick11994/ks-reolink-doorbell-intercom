@@ -312,6 +312,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         callPushToTalk = settings.pushToTalk;
         startStream();
         viewerOpen = true;
+        fireTrigger("callScreenOpened");
         followCards(settings.cards);
         h.showOverlay(OVERLAY, OverlaySpec.fullScreen().onTop(true).closeOnBack(true), new OverlayFactory() {
             @Override public View create(Context context, KsTheme theme) {
@@ -372,6 +373,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         PluginHost h = host;
         if (h != null) h.hideOverlay(OVERLAY);
         viewerOpen = false;
+        fireTrigger("callScreenClosed");
         followCards(Collections.<Cards.Card>emptyList());
         stopMedia();
     }
@@ -943,12 +945,25 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     }
 
     @Override public void ringTrigger() {
+        fireTrigger("doorbellPressed");
+    }
+
+    @Override public void answeredTrigger() {
+        fireTrigger("answered");
+    }
+
+    @Override public void missedTrigger() {
+        fireTrigger("missedRing");
+    }
+
+    /** Runs the gestures mapped to a trigger of the manifest. */
+    private void fireTrigger(String id) {
         PluginHost h = host;
         if (h == null) return;
         try {
-            h.fireTrigger("doorbellPressed");
+            h.fireTrigger(id);
         } catch (RuntimeException | LinkageError older) {
-            // Gesture triggers need a newer Kiosk Satellite; the ring itself still works.
+            // Gesture triggers need a newer Kiosk Satellite; the call itself still works.
         }
     }
 

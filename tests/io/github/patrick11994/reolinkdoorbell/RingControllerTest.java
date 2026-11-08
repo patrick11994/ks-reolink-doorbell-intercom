@@ -16,6 +16,8 @@ public final class RingControllerTest {
         @Override public void setAudio(boolean speakerOn, boolean micOn) { calls.add("audio speaker=" + speakerOn + " mic=" + micOn); }
         @Override public void ring() { calls.add("ring"); }
         @Override public void ringTrigger() { calls.add("trigger"); }
+        @Override public void answeredTrigger() { calls.add("answered"); }
+        @Override public void missedTrigger() { calls.add("missed"); }
         @Override public void countdown(long startedAt, long durationMillis) {
             calls.add(durationMillis <= 0 ? "countdown off" : "countdown " + (startedAt - START) / 1000 + "s+" + durationMillis / 1000 + "s");
         }
@@ -62,7 +64,7 @@ public final class RingControllerTest {
         c.onVisitor(true);  // while it rings, the hold answers
         r.take();
         c.talk();
-        check(r.take(), "countdown off, audio speaker=true mic=true, update IN_CALL speaker=true mic=true");
+        check(r.take(), "countdown off, audio speaker=true mic=true, update IN_CALL speaker=true mic=true, answered");
     }
 
     static void onlyRisingEdgeRings() {
@@ -101,7 +103,7 @@ public final class RingControllerTest {
         c.speaker();
         check(r.take(), "countdown off, audio speaker=true mic=false, update LISTENING speaker=true mic=false");
         c.answer();
-        check(r.take(), "audio speaker=true mic=true, update IN_CALL speaker=true mic=true");
+        check(r.take(), "audio speaker=true mic=true, update IN_CALL speaker=true mic=true, answered");
         c.speaker();  // not available in a call
         check(r.take(), "");
     }
@@ -145,6 +147,13 @@ public final class RingControllerTest {
         check(r.take(), "");
         now += 1_000;
         c.tick();
+        check(r.take(), "missed, close");
+
+        c.onVisitor(false);
+        now += RingController.REPEAT_MILLIS + 1;
+        c.onVisitor(true);
+        r.take();
+        c.hangUp();  // Hang up while it rings: someone saw it, so not missed
         check(r.take(), "close");
 
         c.onVisitor(false);
@@ -172,7 +181,7 @@ public final class RingControllerTest {
         check(r.take(), "");
         now += 1_000;
         c.tick();
-        check(r.take(), "close");
+        check(r.take(), "missed, close");
         c.touched();  // a touch after closing does nothing
         check(r.take(), "");
     }
@@ -189,7 +198,7 @@ public final class RingControllerTest {
         check(r.take(), "");
         check(c.state(), State.LISTENING);
         c.answer();  // from listening the countdown is already off
-        check(r.take(), "audio speaker=true mic=true, update IN_CALL speaker=true mic=true");
+        check(r.take(), "audio speaker=true mic=true, update IN_CALL speaker=true mic=true, answered");
     }
 
     static void manualOpenDoesNotRing() {

@@ -22,6 +22,10 @@ public final class RingController {
         void setAudio(boolean speakerOn, boolean micOn);
         void ring();
         void ringTrigger();
+        /** Answer pressed, or Talk first held, after a ring. */
+        void answeredTrigger();
+        /** A ring closed itself after the auto-close time, without anyone pressing Speaker or Answer. */
+        void missedTrigger();
         /** The auto-close countdown (re)started at startedAt and runs for durationMillis; durationMillis 0 hides it. */
         void countdown(long startedAt, long durationMillis);
     }
@@ -133,6 +137,7 @@ public final class RingController {
         micOn = true;
         actions.setAudio(true, true);
         actions.updateViewer(state, speakerOn, micOn);
+        actions.answeredTrigger();
     }
 
     /**
@@ -187,7 +192,10 @@ public final class RingController {
     public synchronized void tick() {
         if (state == State.IDLE) return;
         if (state == State.RINGING) {
-            if (counting && autoCloseMillis > 0 && clock.now() - lastActivity >= autoCloseMillis) hangUp();
+            if (counting && autoCloseMillis > 0 && clock.now() - lastActivity >= autoCloseMillis) {
+                actions.missedTrigger();
+                hangUp();
+            }
             return;
         }
         if (maxCallMillis > 0 && clock.now() - callStarted >= maxCallMillis) hangUp();
