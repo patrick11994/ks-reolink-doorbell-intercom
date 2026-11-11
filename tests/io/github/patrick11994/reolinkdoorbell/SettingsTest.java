@@ -73,6 +73,17 @@ public final class SettingsTest {
             check(new ReolinkPlugin.Settings(values).channelValid, false);
             check(new ReolinkPlugin.Settings(values).channel, 0);  // the doorbell's own channel until it is fixed
         }
+
+        // Button presses over picks the event session: a change must start a new one, a changed chime must not.
+        Map<String, Object> before = new HashMap<>();
+        before.put("host", "192.168.1.50");
+        before.put("username", "kiosk");
+        before.put("password", "secret");
+        Map<String, Object> after = new HashMap<>(before);
+        after.put("chime", false);
+        check(new ReolinkPlugin.Settings(before).sameConnection(new ReolinkPlugin.Settings(after)), true);
+        after.put("events", "ONVIF");
+        check(new ReolinkPlugin.Settings(before).sameConnection(new ReolinkPlugin.Settings(after)), false);
         System.out.println("SettingsTest passed (" + seen.size() + " choices)");
     }
 

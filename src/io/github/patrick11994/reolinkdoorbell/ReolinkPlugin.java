@@ -1121,8 +1121,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             return !host.isEmpty() && !username.isEmpty() && !password.isEmpty();
         }
 
+        /** Whether the event session can stay: Button presses over picks the session itself, so a change starts a new one. */
         boolean sameConnection(Settings other) {
-            return host.equals(other.host) && username.equals(other.username) && password.equals(other.password);
+            return host.equals(other.host) && username.equals(other.username) && password.equals(other.password) && eventsPath.equals(other.eventsPath);
         }
 
         /** The Channel field as typed (a number in a text field, or a number from a beta that had a slider); -1 if none. */
