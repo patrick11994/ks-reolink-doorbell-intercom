@@ -41,7 +41,7 @@ public final class RtspSession {
 
     private final String host;
     private final int port;
-    private final String url;
+    private String url;
     private final String username;
     private final String password;
     private final long keepaliveMillis;
@@ -69,8 +69,18 @@ public final class RtspSession {
         this.keepaliveMillis = keepaliveMillis;
     }
 
-    public String url() {
+    public synchronized String url() {
         return url;
+    }
+
+    /** A request the server answered with a status other than 200 or 401. */
+    static final class StatusException extends IOException {
+        final int status;
+
+        StatusException(String method, int status) {
+            super(method + " failed with " + status);
+            this.status = status;
+        }
     }
 
     /** OPTIONS and DESCRIBE; extra headers (such as the ONVIF backchannel Require) go on every request. */
@@ -84,7 +94,16 @@ public final class RtspSession {
         request("OPTIONS", url, extra);
         Map<String, String> headers = new LinkedHashMap<>(extra);
         headers.put("Accept", "application/sdp");
-        Response response = request("DESCRIBE", url, headers);
+        Response response;
+        try {
+            response = request("DESCRIBE", url, headers);
+        } catch (StatusException missing) {
+            // Newer firmware, such as the Video Doorbell WiFi Gen 2's, serves only the paths the Reolink app names,
+            // /Preview_01_main, and answers the older /h264Preview_01_main with 404 (#13).
+            if (missing.status != 404 || !url.contains("/h264Preview_")) throw missing;
+            url = url.replace("/h264Preview_", "/Preview_");
+            response = request("DESCRIBE", url, headers);
+        }
         contentBase = response.headers.get("content-base");
         return Sdp.parse(response.body);
     }
@@ -273,7 +292,7 @@ public final class RtspSession {
                 }
             }
             if (response.status == 401) throw new IOException("the doorbell refused the username or password");
-            if (response.status != 200) throw new IOException(method + " failed with " + response.status);
+            if (response.status != 200) throw new StatusException(method, response.status);
             return response;
         }
         throw new IOException(method + " failed: authentication refused");

@@ -28,6 +28,7 @@ public final class MediaTest {
         rtspRefusesHugeAnswers();
         rtspStallAndSilence();
         rtspH265IsNamed();
+        rtspAppStylePath();
         System.out.println("MediaTest passed");
     }
 
@@ -176,6 +177,39 @@ public final class MediaTest {
             check(failed.get(3, java.util.concurrent.TimeUnit.SECONDS).contains("H.265"), true);
             hub.stop();
             fake.join(3000);
+        } catch (Exception e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    /** Firmware that only serves the Reolink app's /Preview_01_sub answers /h264Preview_01_sub with 404 (#13). */
+    static void rtspAppStylePath() {
+        try (java.net.ServerSocket server = new java.net.ServerSocket(0)) {
+            java.util.List<String> asked = new java.util.ArrayList<>();
+            Thread fake = new Thread(() -> {
+                try (java.net.Socket socket = server.accept()) {
+                    java.io.BufferedReader requests = new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(), java.nio.charset.StandardCharsets.US_ASCII));
+                    java.io.OutputStream out = socket.getOutputStream();
+                    for (int cseq = 1; cseq <= 3; cseq++) {  // OPTIONS, DESCRIBE of the old path, DESCRIBE of the new one
+                        String first = requests.readLine();
+                        for (String line = requests.readLine(); line != null && !line.isEmpty(); line = requests.readLine()) {}
+                        synchronized (asked) { asked.add(first.split(" ")[0] + " " + first.split(" ")[1].replaceFirst("rtsp://[^/]+", "")); }
+                        boolean found = cseq != 2;
+                        String body = cseq == 3 ? DOORBELL_SDP : "";
+                        out.write(("RTSP/1.0 " + (found ? "200 OK" : "404 Not Found") + "\r\nCSeq: " + cseq + "\r\nContent-Length: " + body.length() + "\r\n\r\n" + body).getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                    }
+                } catch (Exception closed) {
+                    // The client closed the session.
+                }
+            });
+            fake.start();
+            RtspSession rtsp = new RtspSession("127.0.0.1", server.getLocalPort(), "/h264Preview_01_sub", "u", "p");
+            Sdp sdp = rtsp.describe(java.util.Collections.<String, String>emptyMap());
+            check(sdp.receive("video") != null, true);
+            check(rtsp.url().endsWith("/Preview_01_sub"), true);
+            rtsp.close();
+            fake.join(3000);
+            synchronized (asked) { check(String.join(", ", asked), "OPTIONS /h264Preview_01_sub, DESCRIBE /h264Preview_01_sub, DESCRIBE /Preview_01_sub"); }
         } catch (Exception e) {
             throw new AssertionError(e);
         }
