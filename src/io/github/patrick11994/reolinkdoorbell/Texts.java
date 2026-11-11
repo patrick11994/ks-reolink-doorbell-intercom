@@ -206,6 +206,7 @@ final class Texts {
     String checkAccountDevice() { return get("checkAccountDevice"); }
     String checkNoVideo() { return get("checkNoVideo"); }
     String checkNoTalk() { return get("checkNoTalk"); }
+    String checkNoOnvifEvents() { return get("checkNoOnvifEvents"); }
     String checkNoBaichuanTalk() { return get("checkNoBaichuanTalk"); }
     String checkMainTooLarge(String size) { return format("checkMainTooLarge", "size", size); }
     String checkVideoTooLarge(String size) { return format("checkVideoTooLarge", "size", size); }

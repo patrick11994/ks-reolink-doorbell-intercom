@@ -26,6 +26,7 @@ public final class SettingsTest {
         parsed.put("stream", s -> s.streamPath);
         parsed.put("videoSource", s -> s.videoPath);
         parsed.put("talk", s -> s.talkPath);
+        parsed.put("events", s -> s.eventsPath);
         parsed.put("talkMode", s -> s.pushToTalk);
         parsed.put("microphone", s -> s.microphone);
         parsed.put("micRate", s -> s.micRate);

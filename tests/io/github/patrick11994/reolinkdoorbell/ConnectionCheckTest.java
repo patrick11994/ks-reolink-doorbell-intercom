@@ -22,6 +22,32 @@ public final class ConnectionCheckTest {
         check(unreachable.ok, false);
         check(unreachable.message, english.checkUnreachable("127.0.0.1"));
 
+        // A doorbell without Baichuan, such as the Video Doorbell WiFi Gen 2 (#14): Automatic checks its button presses
+        // over ONVIF instead, and says so when that login is refused. Set to Baichuan, the closed port is the answer.
+        try (ServerSocket onvif = new ServerSocket(0)) {
+            List<String> lines = new CopyOnWriteArrayList<>();
+            Thread doorbell = new Thread(() -> {
+                for (int i = 0; i < 2; i++) {
+                    try (java.net.Socket socket = onvif.accept()) {
+                        java.io.InputStream in = socket.getInputStream();
+                        in.read(new byte[8192]);
+                        socket.getOutputStream().write(("HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Digest realm=\"camara\", qop=\"auth\", nonce=\"n1\"\r\n"
+                            + "Content-Length: 0\r\nConnection: close\r\n\r\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                    } catch (Exception closedEarly) {
+                        return;
+                    }
+                }
+            });
+            doorbell.start();
+            ConnectionCheck.Result gen2 = ConnectionCheck.run("127.0.0.1", closed, closed, onvif.getLocalPort(), MAIN, "Automatic", "Automatic", "Automatic",
+                "u", "wrong", 0, PICTURE, PLAYS, lines::add, english);
+            check(gen2.message, english.checkLoginRefused());
+            check(lines.get(0).contains("over ONVIF"), true);
+            doorbell.join(3000);
+            check(ConnectionCheck.run("127.0.0.1", closed, closed, onvif.getLocalPort(), MAIN, "Automatic", "Automatic", "Baichuan",
+                "u", "p", 0, PICTURE, PLAYS, LOG, english).message, english.checkUnreachable("127.0.0.1"));
+        }
+
         try (ServerSocket server = new ServerSocket(0)) {
             Thread doorbell = new Thread(() -> BaichuanClientTest.fakeDoorbell(server, "real", new CopyOnWriteArrayList<>()));
             doorbell.start();

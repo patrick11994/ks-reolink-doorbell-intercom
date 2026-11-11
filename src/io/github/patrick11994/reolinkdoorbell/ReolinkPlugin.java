@@ -26,10 +26,11 @@ import io.github.patrick11994.reolinkdoorbell.RingController.State;
 import io.github.patrick11994.reolinkdoorbell.baichuan.AlarmEvents;
 import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanClient;
 import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanStream;
+import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanTalk;
 import io.github.patrick11994.reolinkdoorbell.media.FallbackStream;
 import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
 import io.github.patrick11994.reolinkdoorbell.media.StreamHub;
-import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanTalk;
+import io.github.patrick11994.reolinkdoorbell.onvif.OnvifEvents;
 import io.github.patrick11994.reolinkdoorbell.talk.Backchannel;
 import io.github.patrick11994.reolinkdoorbell.talk.FallbackTalk;
 import io.github.patrick11994.reolinkdoorbell.talk.TalkChannel;
@@ -49,6 +50,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private volatile RingController controller;
     private volatile DoorbellView view;
     private volatile BaichuanClient events;  // written under this
+    private volatile OnvifEvents onvifEvents;  // button presses over ONVIF instead, written under this
     private ScheduledExecutorService ticker;
     private volatile WakeWordGuard wakeWord;
     private volatile MusicPause music;
@@ -235,6 +237,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         BaichuanClient client = events;
         events = null;
         if (client != null) client.stop();
+        OnvifEvents onvif = onvifEvents;
+        onvifEvents = null;
+        if (onvif != null) onvif.stop();
         ScheduledExecutorService t = ticker;
         ticker = null;
         if (t != null) t.shutdownNow();
@@ -252,19 +257,35 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         BaichuanClient previous = events;
         events = null;
         if (previous != null) previous.stop();
+        OnvifEvents previousOnvif = onvifEvents;
+        onvifEvents = null;
+        if (previousOnvif != null) previousOnvif.stop();
         Settings s = settings;
         if (!s.configured()) {
             status(texts.enterSettings(), true);
             publishText("connection", texts.connectionReading(), texts.notConfigured());
             return;
         }
+        if (s.eventsPath.equals("ONVIF")) {
+            connectOnvif(s);
+            return;
+        }
         BaichuanClient[] self = new BaichuanClient[1];  // a replaced client can take up to its timeout to stop: ignore it
         BaichuanClient client = new BaichuanClient(s.host, 9000, s.username, s.password, new BaichuanClient.Listener() {
             private String logged = "";  // each change once: a doorbell that is away fails every few seconds
             private final Set<Integer> otherChannels = new HashSet<>();  // presses on other channels, logged once each
+            private boolean answered;  // the doorbell has spoken Baichuan once: a refusal later is a reboot, not a missing port
 
             @Override public void onConnection(boolean connected, String detail) {
                 if (events != self[0]) return;
+                if (connected) answered = true;
+                if (!connected && !answered && s.eventsPath.equals("Automatic") && portClosed(detail)) {
+                    // Nothing listens on 9000, as on the Video Doorbell WiFi Gen 2: its presses come over ONVIF (#14).
+                    log("events: the doorbell refuses Baichuan on port 9000 (" + detail + "), so button presses come over ONVIF");
+                    ScheduledExecutorService ticking = ticker;
+                    if (ticking != null) ticking.execute(() -> switchToOnvif(self[0]));
+                    return;
+                }
                 Texts t = texts;
                 boolean connecting = "connecting".equals(detail);
                 // Retrying after a drop: keep saying what is wrong, rather than flipping to "connecting" every few seconds.
@@ -293,6 +314,49 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         });
         self[0] = client;
         events = client;
+        client.start();
+    }
+
+    /** Whether a dropped Baichuan session means nothing listens on its port, rather than a doorbell that is away. */
+    static boolean portClosed(String detail) {
+        return detail.contains("ECONNREFUSED") || detail.contains("Connection refused");
+    }
+
+    /** Automatic, after the doorbell refused Baichuan: unless the settings changed in between, go on over ONVIF. */
+    private synchronized void switchToOnvif(BaichuanClient refused) {
+        if (stopped || events != refused) return;
+        events = null;
+        refused.stop();
+        connectOnvif(settings);
+    }
+
+    /** Button presses over ONVIF: a PullPoint subscription on port 8000. */
+    private synchronized void connectOnvif(Settings s) {
+        OnvifEvents[] self = new OnvifEvents[1];
+        OnvifEvents client = new OnvifEvents(s.host, 8000, s.username, s.password, new OnvifEvents.Listener() {
+            private String logged = "";
+
+            @Override public void onConnection(boolean connected, String detail) {
+                if (onvifEvents != self[0]) return;
+                Texts t = texts;
+                boolean connecting = "connecting".equals(detail);
+                if (connecting && !logged.isEmpty() && !logged.equals("connected")) return;
+                if (!connecting && !detail.equals(logged)) log("events over ONVIF: " + detail);
+                if (!connecting) logged = detail;
+                String shown = connected ? t.connected() : connecting ? t.connectingState() : ConnectionCheck.problem(detail, t);
+                publishText("connection", t.connectionReading(), shown);
+                status(connected ? t.connectedTo(s.name(t)) : t.doorbellProblem(shown), !connected && !connecting);
+            }
+
+            @Override public void onVisitor(boolean visitor) {
+                RingController c = controller;
+                if (c == null || onvifEvents != self[0]) return;
+                if (visitor) publishText("last_ring", texts.lastRingReading(), new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date()));
+                c.onVisitor(visitor);
+            }
+        });
+        self[0] = client;
+        onvifEvents = client;
         client.start();
     }
 
@@ -500,7 +564,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             try {
                 h.setupResult(run, "running", t.checking());
                 ConnectionCheck.Result result = !s.channelValid ? new ConnectionCheck.Result(false, t.checkBadChannel())
-                    : ConnectionCheck.run(s.host, 9000, 554, s.streamPath, s.videoPath, s.talkPath, s.username, s.password, s.channel,
+                    : ConnectionCheck.run(s.host, 9000, 554, 8000, s.streamPath, s.videoPath, s.talkPath, s.eventsPath, s.username, s.password, s.channel,
                     (path, listener) -> path.equals("RTSP") ? new StreamHub(s.host, 554, s.streamPath, s.username, s.password, listener)
                         : new BaichuanStream(s.host, 9000, s.username, s.password, s.channel, s.streamPath.endsWith("_sub"), listener),
                     new ConnectionCheck.Player() {
@@ -997,7 +1061,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     /** The validated settings as plain fields. */
     static final class Settings {
-        final String host, username, password, streamPath, language, microphone, micRate, musicPause, chimeStream, talkPath, videoPath;
+        final String host, username, password, streamPath, language, microphone, micRate, musicPause, chimeStream, talkPath, videoPath, eventsPath;
         private final String name;
         final boolean chime, wakeScreen, wakeWordRestore, musicRestore, callMode, pushToTalk;
         final long autoCloseMillis, maxCallMillis;
@@ -1020,6 +1084,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             videoPath = video.startsWith("Baichuan") ? "Baichuan" : video.startsWith("RTSP") ? "RTSP" : "Automatic";
             String path = string(values, "talk");
             talkPath = path.startsWith("Baichuan") ? "Baichuan" : path.startsWith("ONVIF") ? "ONVIF" : "Automatic";
+            String presses = string(values, "events");
+            eventsPath = presses.startsWith("Baichuan") ? "Baichuan" : presses.startsWith("ONVIF") ? "ONVIF" : "Automatic";
             pushToTalk = string(values, "talkMode").equals("Push to talk");
             chime = !Boolean.FALSE.equals(values.get("chime"));
             Object chimeLevel = values.get("chimeVolume");

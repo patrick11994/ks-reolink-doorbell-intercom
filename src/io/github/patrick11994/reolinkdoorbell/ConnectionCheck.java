@@ -15,6 +15,7 @@ import io.github.patrick11994.reolinkdoorbell.media.AvcConfig;
 import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
 import io.github.patrick11994.reolinkdoorbell.media.RtspSession;
 import io.github.patrick11994.reolinkdoorbell.media.Sdp;
+import io.github.patrick11994.reolinkdoorbell.onvif.OnvifEvents;
 
 /**
  * The settings page's Check button: what a call needs, in order, each with a message a person can act on. Button
@@ -72,23 +73,47 @@ final class ConnectionCheck {
     /** channel: the doorbell's channel behind an NVR, counted from 0; 0 for a doorbell reached directly. */
     static Result run(String host, int baichuanPort, int rtspPort, String rtspPath, String videoPath, String talkPath, String username, String password,
                       int channel, Streams streams, Player player, Log log, Texts texts) {
+        return run(host, baichuanPort, rtspPort, 0, rtspPath, videoPath, talkPath, "Baichuan", username, password, channel, streams, player, log, texts);
+    }
+
+    /** eventsPath: how button presses come, the Button presses over setting; onvifPort the doorbell's ONVIF port for them. */
+    static Result run(String host, int baichuanPort, int rtspPort, int onvifPort, String rtspPath, String videoPath, String talkPath, String eventsPath,
+                      String username, String password, int channel, Streams streams, Player player, Log log, Texts texts) {
         try {
-            return checks(host, baichuanPort, rtspPort, rtspPath, videoPath, talkPath, username, password, channel, streams, player, log, texts);
+            return checks(host, baichuanPort, rtspPort, onvifPort, rtspPath, videoPath, talkPath, eventsPath, username, password, channel, streams, player, log, texts);
         } catch (RuntimeException error) {
             return new Result(false, texts.checkFailed(describe(error)));
         }
     }
 
-    private static Result checks(String host, int baichuanPort, int rtspPort, String rtspPath, String videoPath, String talkPath, String username, String password,
-                                 int channel, Streams streams, Player player, Log log, Texts texts) {
+    private static Result checks(String host, int baichuanPort, int rtspPort, int onvifPort, String rtspPath, String videoPath, String talkPath, String eventsPath,
+                                 String username, String password, int channel, Streams streams, Player player, Log log, Texts texts) {
         if (host.isEmpty() || username.isEmpty() || password.isEmpty()) return new Result(false, texts.checkNotConfigured());
-        try {
-            BaichuanClient.verify(host, baichuanPort, username, password);
-        } catch (BaichuanClient.LoginRefused refused) {
-            boolean account = refused.getMessage() != null && refused.getMessage().contains("account device");
-            return new Result(false, account ? texts.checkAccountDevice() : texts.checkLoginRefused());
-        } catch (IOException error) {
-            return new Result(false, unreachable(error) ? texts.checkUnreachable(host) : texts.checkFailed(describe(error)));
+        // Button presses, the way the event session gets them: Baichuan, or ONVIF where nothing listens on 9000 (#14).
+        boolean overOnvif = eventsPath.equals("ONVIF");
+        if (!overOnvif) {
+            try {
+                BaichuanClient.verify(host, baichuanPort, username, password);
+            } catch (BaichuanClient.LoginRefused refused) {
+                boolean account = refused.getMessage() != null && refused.getMessage().contains("account device");
+                return new Result(false, account ? texts.checkAccountDevice() : texts.checkLoginRefused());
+            } catch (IOException error) {
+                if (!eventsPath.equals("Automatic") || !portClosed(error)) {
+                    return new Result(false, unreachable(error) ? texts.checkUnreachable(host) : texts.checkFailed(describe(error)));
+                }
+                log.line("check: nothing answers Baichuan on port " + baichuanPort + ", so button presses come over ONVIF");
+                overOnvif = true;
+            }
+        }
+        if (overOnvif) {
+            try {
+                OnvifEvents.verify(host, onvifPort, username, password);
+            } catch (OnvifEvents.Refused refused) {
+                return new Result(false, texts.checkLoginRefused());
+            } catch (IOException error) {
+                log.line("check: button presses over ONVIF: " + describe(error));
+                return new Result(false, unreachable(error) ? texts.checkUnreachable(host) : texts.checkNoOnvifEvents());
+            }
         }
         boolean onvifTalk;
         RtspSession rtsp = new RtspSession(host, rtspPort, rtspPath, username, password);
@@ -188,6 +213,12 @@ final class ConnectionCheck {
         } catch (IOException error) {
             return false;
         }
+    }
+
+    /** Nothing listens on the port, rather than a doorbell that is away. */
+    static boolean portClosed(IOException error) {
+        String message = String.valueOf(error.getMessage());
+        return error instanceof ConnectException && (message.contains("refused") || message.contains("ECONNREFUSED"));
     }
 
     private static boolean unreachable(IOException error) {
