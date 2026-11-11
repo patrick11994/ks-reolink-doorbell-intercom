@@ -39,8 +39,8 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 
 | | |
 |---|---|
-| **Doorbell** | A Reolink video doorbell on your local network, reachable from the panel. Tested with the **Reolink Video Doorbell PoE**, firmware v3.0.0.6460. Other Reolink doorbells that offer RTSP should work, but have not been tested. |
-| **On the doorbell** | **RTSP** turned on, and preferably **ONVIF** too. In the Reolink app, go to Settings > Network > Advanced > Server Settings. Video and talking go over Reolink's own protocol (Baichuan, port 9000); RTSP and ONVIF are the fallbacks for doorbells that refuse that, and the **Check** button uses RTSP. The doorbell must be a *local device*, not an *account device*. |
+| **Doorbell** | A Reolink video doorbell on your local network, reachable from the panel. Tested with the **Reolink Video Doorbell PoE**, firmware v3.0.0.6460. Other Reolink doorbells that offer RTSP should work, but have not been tested. The **Video Doorbell WiFi Gen 2** has been reported to work, with **Video** set to *Sub*, since its main stream is H.265. |
+| **On the doorbell** | **RTSP** turned on, and preferably **ONVIF** too. In the Reolink app, go to Settings > Network > Advanced > Server Settings. Video and talking go over Reolink's own protocol (Baichuan, port 9000); RTSP and ONVIF are the fallbacks for doorbells that refuse that, and the **Check** button uses RTSP. A doorbell without Baichuan, such as the Video Doorbell WiFi Gen 2, needs ONVIF for its button presses. The doorbell must be a *local device*, not an *account device*. |
 | **Panel** | Kiosk Satellite **2026.10.42** or newer, Android 8.0 or newer, with a microphone and a speaker. Tested on an RK3576 Android 14 panel. |
 
 The cards need Kiosk Satellite's own Home Assistant connection (Settings > Home Assistant); the rest of the plugin works without it.
@@ -79,6 +79,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Doorbell | **Doorbell address** | IP address or hostname of the doorbell, or of the NVR it is connected to | |
 | Doorbell | **Username** / **Password** | A Reolink user on the doorbell. The password is stored as a masked secret. | |
 | Doorbell | **Channel** | Only for a doorbell connected to a Reolink NVR: its channel there, as the Reolink app shows it | 1 |
+| Doorbell | **Button presses over** | *Automatic* (Baichuan, and ONVIF if the doorbell refuses it), *Baichuan* or *ONVIF*. ONVIF is for doorbells without Reolink's own protocol, such as the Video Doorbell WiFi Gen 2. | Automatic |
 | Doorbell | **Name** | Shown at the top of the call screen. Empty shows *Front door*. | empty |
 | Doorbell | **Check the doorbell** | Tests button presses, video and talking with your settings, and whether this device can play the video | |
 | Ringing | **Play a chime** | A ding-dong when the button is pressed | on |
@@ -101,11 +102,13 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 
 **Actions:**
 
-| Action | What it does |
-|---|---|
-| **Open** | Opens the call screen without a ring |
-| **Test ring** | Does what a real press does |
-| **Close** | Closes the call screen |
+| Action | What it does | Dashboard link |
+|---|---|---|
+| **Open** | Opens the call screen without a ring | `ks://plugin/reolink-doorbell/show` |
+| **Test ring** | Does what a real press does | `ks://plugin/reolink-doorbell/testRing` |
+| **Close** | Closes the call screen | `ks://plugin/reolink-doorbell/dismiss` |
+
+Point a Home Assistant dashboard button's tap action at a dashboard link to run the action on the panel that shows the dashboard, for example a button that opens the call screen to look outside. Dashboard links need Kiosk Satellite 2026.11.16 or newer.
 
 **Triggers**, for Gestures:
 
@@ -142,7 +145,7 @@ The card's colour follows the state the way Home Assistant does: a light that is
 
 ## Privacy and security
 
-- **Nothing leaves your network.** The plugin connects only to the doorbell, on two ports: 9000 (button presses, video and sound, and talking) and 554 (RTSP and the ONVIF audio backchannel, when the plugin falls back to them, and for the Check button). It has no analytics, and it contacts no other service. The optional cards read the entities you pick and run the actions you pick through Kiosk Satellite's own Home Assistant connection; the plugin never gets its address or token.
+- **Nothing leaves your network.** The plugin connects only to the doorbell, on three ports: 9000 (button presses, video and sound, and talking), 554 (RTSP and the ONVIF audio backchannel, when the plugin falls back to them, and for the Check button) and 8000 (button presses over ONVIF, for doorbells without Baichuan). It has no analytics, and it contacts no other service. The optional cards read the entities you pick and run the actions you pick through Kiosk Satellite's own Home Assistant connection; the plugin never gets its address or token.
 - **The doorbell password** is stored as a Kiosk Satellite secret setting. Plugin Manager and Remote Admin mask it. Use a separate, non-admin Reolink user for the panel.
 - **The connections are not encrypted.** Reolink's local protocols are not, so keep the doorbell and the panel on a trusted network.
 - **The microphone** is only on during a call. In *Hands free* it is on while the call screen shows **Microphone** as on. In *Push to talk* it stays open (muted) from the first hold until the call ends, so the next hold starts at once and Android may show its microphone indicator meanwhile; your voice is only sent while you hold the button. Every call ends after **End a call after**. Nothing is recorded or stored.
@@ -182,11 +185,11 @@ The call screen, the messages, the readings and the Check button's results can b
 
 | Language | Translated | Out of date | File |
 | --- | --- | --- | --- |
-| Nederlands | 100% (82 of 82) | – | [`nl.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/nl.properties) |
-| Português (Brasil) | 100% (82 of 82) | – | [`pt-BR.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/pt-BR.properties) |
-| Deutsch | 47% (39 of 82) | – | [`de.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/de.properties) |
-| Français | 6% (5 of 82) | – | [`fr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/fr.properties) |
-| Hrvatski | 100% (82 of 82) | – | [`hr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/hr.properties) |
+| Nederlands | 100% (83 of 83) | – | [`nl.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/nl.properties) |
+| Português (Brasil) | 98% (82 of 83) | – | [`pt-BR.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/pt-BR.properties) |
+| Deutsch | 46% (39 of 83) | – | [`de.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/de.properties) |
+| Français | 6% (5 of 83) | – | [`fr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/fr.properties) |
+| Hrvatski | 98% (82 of 83) | – | [`hr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/hr.properties) |
 
 <!-- /translations -->
 
