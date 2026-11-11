@@ -187,19 +187,23 @@ public final class MediaTest {
         try (java.net.ServerSocket server = new java.net.ServerSocket(0)) {
             java.util.List<String> asked = new java.util.ArrayList<>();
             Thread fake = new Thread(() -> {
-                try (java.net.Socket socket = server.accept()) {
-                    java.io.BufferedReader requests = new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(), java.nio.charset.StandardCharsets.US_ASCII));
-                    java.io.OutputStream out = socket.getOutputStream();
-                    for (int cseq = 1; cseq <= 3; cseq++) {  // OPTIONS, DESCRIBE of the old path, DESCRIBE of the new one
-                        String first = requests.readLine();
-                        for (String line = requests.readLine(); line != null && !line.isEmpty(); line = requests.readLine()) {}
-                        synchronized (asked) { asked.add(first.split(" ")[0] + " " + first.split(" ")[1].replaceFirst("rtsp://[^/]+", "")); }
-                        boolean found = cseq != 2;
-                        String body = cseq == 3 ? DOORBELL_SDP : "";
-                        out.write(("RTSP/1.0 " + (found ? "200 OK" : "404 Not Found") + "\r\nCSeq: " + cseq + "\r\nContent-Length: " + body.length() + "\r\n\r\n" + body).getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                // The first session: OPTIONS, DESCRIBE of the old path (404), DESCRIBE of the new one. The second: OPTIONS, DESCRIBE.
+                for (int requestsInSession : new int[] {3, 2}) {
+                    try (java.net.Socket socket = server.accept()) {
+                        java.io.BufferedReader requests = new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(), java.nio.charset.StandardCharsets.US_ASCII));
+                        java.io.OutputStream out = socket.getOutputStream();
+                        for (int cseq = 1; cseq <= requestsInSession; cseq++) {
+                            String first = requests.readLine();
+                            for (String line = requests.readLine(); line != null && !line.isEmpty(); line = requests.readLine()) {}
+                            String path = first.split(" ")[1].replaceFirst("rtsp://[^/]+", "");
+                            synchronized (asked) { asked.add(first.split(" ")[0] + " " + path); }
+                            boolean found = !(first.startsWith("DESCRIBE") && path.startsWith("/h264Preview_"));
+                            String body = first.startsWith("DESCRIBE") && found ? DOORBELL_SDP : "";
+                            out.write(("RTSP/1.0 " + (found ? "200 OK" : "404 Not Found") + "\r\nCSeq: " + cseq + "\r\nContent-Length: " + body.length() + "\r\n\r\n" + body).getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                        }
+                    } catch (Exception closed) {
+                        // The client closed the session.
                     }
-                } catch (Exception closed) {
-                    // The client closed the session.
                 }
             });
             fake.start();
@@ -208,8 +212,14 @@ public final class MediaTest {
             check(sdp.receive("video") != null, true);
             check(rtsp.url().endsWith("/Preview_01_sub"), true);
             rtsp.close();
+            RtspSession again = new RtspSession("127.0.0.1", server.getLocalPort(), "/h264Preview_01_main", "u", "p");
+            check(again.describe(java.util.Collections.<String, String>emptyMap()).receive("video") != null, true);
+            again.close();
             fake.join(3000);
-            synchronized (asked) { check(String.join(", ", asked), "OPTIONS /h264Preview_01_sub, DESCRIBE /h264Preview_01_sub, DESCRIBE /Preview_01_sub"); }
+            synchronized (asked) {
+                check(String.join(", ", asked), "OPTIONS /h264Preview_01_sub, DESCRIBE /h264Preview_01_sub, DESCRIBE /Preview_01_sub, "
+                    + "OPTIONS /Preview_01_main, DESCRIBE /Preview_01_main");  // remembered: no 404 the second time
+            }
         } catch (Exception e) {
             throw new AssertionError(e);
         }

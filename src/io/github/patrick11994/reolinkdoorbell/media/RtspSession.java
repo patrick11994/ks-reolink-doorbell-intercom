@@ -17,6 +17,8 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
@@ -38,6 +40,8 @@ public final class RtspSession {
     static final long STALL_MILLIS = 5_000;
     private static final Pattern REALM = Pattern.compile("realm=\"([^\"]*)\"");
     private static final Pattern NONCE = Pattern.compile("nonce=\"([^\"]*)\"");
+    /** Doorbells that answer only the Reolink app's paths (#13), as host:port: later sessions ask for those right away. */
+    private static final Set<String> APP_PATHS = ConcurrentHashMap.newKeySet();
 
     private final String host;
     private final int port;
@@ -63,7 +67,8 @@ public final class RtspSession {
     RtspSession(String host, int port, String path, String username, String password, long keepaliveMillis) {
         this.host = host;
         this.port = port;
-        this.url = "rtsp://" + host + ":" + port + (path.startsWith("/") ? path : "/" + path);
+        String url = "rtsp://" + host + ":" + port + (path.startsWith("/") ? path : "/" + path);
+        this.url = APP_PATHS.contains(host + ":" + port) ? url.replace("/h264Preview_", "/Preview_") : url;
         this.username = username;
         this.password = password;
         this.keepaliveMillis = keepaliveMillis;
@@ -99,10 +104,15 @@ public final class RtspSession {
             response = request("DESCRIBE", url, headers);
         } catch (StatusException missing) {
             // Newer firmware, such as the Video Doorbell WiFi Gen 2's, serves only the paths the Reolink app names,
-            // /Preview_01_main, and answers the older /h264Preview_01_main with 404 (#13).
-            if (missing.status != 404 || !url.contains("/h264Preview_")) throw missing;
-            url = url.replace("/h264Preview_", "/Preview_");
+            // /Preview_01_main, and answers the older /h264Preview_01_main with 404 (#13). Remembered for the next
+            // session; a remembered path that stops working (another doorbell on the same address) is tried the old way.
+            boolean appPath = url.contains("/h264Preview_");
+            String other = appPath ? url.replace("/h264Preview_", "/Preview_") : url.replace("/Preview_", "/h264Preview_");
+            if (missing.status != 404 || other.equals(url)) throw missing;
+            url = other;
             response = request("DESCRIBE", url, headers);
+            if (appPath) APP_PATHS.add(host + ":" + port);
+            else APP_PATHS.remove(host + ":" + port);
         }
         contentBase = response.headers.get("content-base");
         return Sdp.parse(response.body);
