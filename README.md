@@ -190,6 +190,7 @@ The call screen, the messages, the readings and the Check button's results can b
 | Deutsch | 46% (39 of 83) | – | [`de.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/de.properties) |
 | Français | 6% (5 of 83) | – | [`fr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/fr.properties) |
 | Hrvatski | 98% (82 of 83) | – | [`hr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/hr.properties) |
+| Italiano | 100% (83 of 83) | – | [`it.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/it.properties) |
 
 <!-- /translations -->
 
