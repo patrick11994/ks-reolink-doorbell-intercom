@@ -39,7 +39,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 
 | | |
 |---|---|
-| **Doorbell** | A Reolink video doorbell on your local network, reachable from the panel. Tested with the **Reolink Video Doorbell PoE**, firmware v3.0.0.6460. Other Reolink doorbells that offer RTSP should work, but have not been tested. The **Video Doorbell WiFi Gen 2** has been reported to work, with **Video** set to *Sub*, since its main stream is H.265. |
+| **Doorbell** | A Reolink video doorbell on your local network, reachable from the panel. Tested with the **Reolink Video Doorbell PoE**, firmware v3.0.0.6460. Other Reolink doorbells that offer RTSP should work, but have not been tested. The **Video Doorbell WiFi Gen 2** has been reported to work with **Video** set to *Sub*. Its main stream is H.265, which the plugin plays on devices with an H.265 decoder; **Check** says when a device has none. |
 | **On the doorbell** | **RTSP** turned on, and preferably **ONVIF** too. In the Reolink app, go to Settings > Network > Advanced > Server Settings. Video and talking go over Reolink's own protocol (Baichuan, port 9000); RTSP and ONVIF are the fallbacks for doorbells that refuse that, and the **Check** button uses RTSP. A doorbell without Baichuan, such as the Video Doorbell WiFi Gen 2, needs ONVIF for its button presses. The doorbell must be a *local device*, not an *account device*. |
 | **Panel** | Kiosk Satellite **2026.10.42** or newer, Android 8.0 or newer, with a microphone and a speaker. Tested on an RK3576 Android 14 panel. |
 
@@ -159,7 +159,7 @@ The card's colour follows the state the way Home Assistant does: a light that is
 | **Check** says it cannot reach the doorbell | The address, and that the panel and the doorbell are on the same network |
 | **Check** says the username or password is refused | Try the same user in the Reolink app |
 | **Check** says video does not work | Turn on RTSP in the Reolink app's Server Settings |
-| **Check** says this device cannot play the main stream | Set **Video** to *Sub (light)*. Some devices, such as the Echo Show 5 and 8, cannot play the doorbell's full picture |
+| **Check** says this device cannot play the main stream | Set **Video** to *Sub (light)*. Some devices, such as the Echo Show 5 and 8, cannot play the doorbell's full picture, and some cannot play H.265, which the Video Doorbell WiFi Gen 2's main stream is |
 | **Check** says video only comes over RTSP | Set **Video over** to *RTSP*, so the picture does not wait for Baichuan first |
 | A doorbell behind an NVR does not ring | Check **Channel**. The Logs say on which channel a press came in (*events: a doorbell press on channel …*) |
 | The picture takes about a second to show | The plugin fell back to RTSP. The Logs say so (*video: falling back to RTSP*). |
@@ -185,12 +185,12 @@ The call screen, the messages, the readings and the Check button's results can b
 
 | Language | Translated | Out of date | File |
 | --- | --- | --- | --- |
-| Nederlands | 100% (85 of 85) | – | [`nl.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/nl.properties) |
-| Português (Brasil) | 96% (82 of 85) | – | [`pt-BR.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/pt-BR.properties) |
-| Deutsch | 45% (39 of 85) | – | [`de.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/de.properties) |
-| Français | 5% (5 of 85) | – | [`fr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/fr.properties) |
-| Hrvatski | 96% (82 of 85) | – | [`hr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/hr.properties) |
-| Italiano | 97% (83 of 85) | – | [`it.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/it.properties) |
+| Nederlands | 100% (83 of 83) | – | [`nl.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/nl.properties) |
+| Português (Brasil) | 98% (82 of 83) | – | [`pt-BR.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/pt-BR.properties) |
+| Deutsch | 46% (39 of 83) | – | [`de.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/de.properties) |
+| Français | 6% (5 of 83) | – | [`fr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/fr.properties) |
+| Hrvatski | 98% (82 of 83) | – | [`hr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/hr.properties) |
+| Italiano | 100% (83 of 83) | – | [`it.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/it.properties) |
 
 <!-- /translations -->
 

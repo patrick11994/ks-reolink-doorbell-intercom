@@ -210,8 +210,6 @@ final class Texts {
     String checkNoBaichuanTalk() { return get("checkNoBaichuanTalk"); }
     String checkMainTooLarge(String size) { return format("checkMainTooLarge", "size", size); }
     String checkVideoTooLarge(String size) { return format("checkVideoTooLarge", "size", size); }
-    String checkMainH265() { return get("checkMainH265"); }
-    String checkVideoH265() { return get("checkVideoH265"); }
     String checkNoBaichuanVideo() { return get("checkNoBaichuanVideo"); }
     String checkVideoOverRtsp() { return get("checkVideoOverRtsp"); }
     String checkBadChannel() { return get("checkBadChannel"); }

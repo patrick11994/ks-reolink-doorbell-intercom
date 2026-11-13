@@ -101,11 +101,13 @@ public final class ConnectionCheckTest {
         opened.clear();
         check(doorbell(BaichuanTalkTest.ABILITY, video, MAIN, "RTSP", "Automatic", requests, streams(opened, "RTSP"), PLAYS, english), english.checkOk());
         check(opened.toString(), "[RTSP]");
-        // RTSP is on, but the stream is H.265, as the Gen 2's main stream (#17): say which Video to pick, not to turn on RTSP.
+        // H.265, as the Video Doorbell WiFi Gen 2 sends its main stream (#17): the decoder is asked about H.265, and a
+        // device without one is told to pick Sub.
         String hevc = video.replace("H264/90000", "H265/90000");
-        check(doorbell(BaichuanTalkTest.ABILITY, hevc, MAIN, "Automatic", "Automatic", requests, streams(opened), PLAYS, english), english.checkMainH265());
-        check(english.checkMainH265().contains("Sub (light)"), true);
-        check(doorbell(BaichuanTalkTest.ABILITY, hevc, "/h264Preview_01_sub", "RTSP", "Automatic", requests, streams(opened), PLAYS, english), english.checkVideoH265());
+        List<String> asked = new CopyOnWriteArrayList<>();
+        check(doorbell(BaichuanTalkTest.ABILITY, hevc, MAIN, "RTSP", "Automatic", requests, streams(HEVC_KEYFRAME, opened, "RTSP"), hevcPlayer(true, asked), english), english.checkOk());
+        check(asked.toString(), "[H.265 640x480]");
+        check(doorbell(BaichuanTalkTest.ABILITY, hevc, MAIN, "RTSP", "Automatic", requests, streams(HEVC_KEYFRAME, opened, "RTSP"), hevcPlayer(false, asked), english), english.checkMainTooLarge("H.265, 640x480"));
 
         // A device that cannot play the picture: the check says so, and which stream to pick instead. The decoder's own
         // answer counts first; when it gives none, one decoded picture decides; when that is unclear too, it passes.
@@ -141,6 +143,22 @@ public final class ConnectionCheckTest {
     private static final byte[] KEYFRAME = concat(new byte[] {0, 0, 0, 1}, java.util.Base64.getDecoder().decode("Z2QAM6wVFKAoAPGQ"),
         new byte[] {0, 0, 0, 1, 0x68, (byte) 0xEE, 0x3C, (byte) 0xB0}, new byte[] {0, 0, 0, 1, 0x65, (byte) 0x88, (byte) 0x84});
     private static final ConnectionCheck.Streams PICTURE = streams(new CopyOnWriteArrayList<>(), "Baichuan", "RTSP");
+    /** An H.265 keyframe: VPS, SPS (640x480) and PPS from libx265, and an IDR slice. */
+    private static final byte[] HEVC_KEYFRAME = concat(
+        new byte[] {0, 0, 0, 1}, java.util.Base64.getDecoder().decode("QAEMAf//BAgAAAMAnggAAAMAAFqVmAk="),
+        new byte[] {0, 0, 0, 1}, java.util.Base64.getDecoder().decode("QgEBBAgAAAMAnggAAAMAAFqQAKBAPCyys0kmV4C3AgIABAAAAwAEAAADAAQg"),
+        new byte[] {0, 0, 0, 1}, java.util.Base64.getDecoder().decode("RAHBcoYMRiQ="), new byte[] {0, 0, 0, 1, 0x28, 0x01, 7});
+
+    /** A decoder that answers canPlay for H.265 only, noting what it was asked. */
+    private static ConnectionCheck.Player hevcPlayer(boolean plays, List<String> asked) {
+        return new ConnectionCheck.Player() {
+            @Override public Boolean canPlay(boolean hevc, int width, int height) {
+                asked.add((hevc ? "H.265 " : "H.264 ") + width + "x" + height);
+                return hevc && plays;
+            }
+            @Override public Boolean decodes(byte[] keyframe) { return null; }
+        };
+    }
 
     /** A decoder that answers canPlay, and decodes when asked; each test decode is noted. */
     private static ConnectionCheck.Player player(Boolean canPlay, Boolean decodes, List<String> decoded) {
@@ -155,13 +173,17 @@ public final class ConnectionCheckTest {
 
     /** Streams that bring a keyframe over the paths named, and fail over any other; each one opened is noted. */
     private static ConnectionCheck.Streams streams(List<String> opened, String... working) {
+        return streams(KEYFRAME, opened, working);
+    }
+
+    private static ConnectionCheck.Streams streams(byte[] keyframe, List<String> opened, String... working) {
         List<String> works = java.util.Arrays.asList(working);
         return (path, listener) -> new io.github.patrick11994.reolinkdoorbell.media.MediaStream() {
             private VideoSink sink;
             @Override public void start() {
                 opened.add(path);
                 new Thread(() -> {
-                    if (works.contains(path)) sink.onVideo(KEYFRAME, 0, true);
+                    if (works.contains(path)) sink.onVideo(keyframe, 0, true);
                     else listener.onStreamState("stream failed: no picture within 2000 ms");
                 }).start();
             }

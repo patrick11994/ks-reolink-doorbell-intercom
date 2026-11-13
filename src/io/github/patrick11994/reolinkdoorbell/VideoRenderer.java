@@ -90,10 +90,15 @@ final class VideoRenderer implements MediaStream.VideoSink {
     static Boolean canPlay(String mime, int width, int height) {
         MediaCodec codec = null;
         try {
-            codec = MediaCodec.createDecoderByType(mime);
+            try {
+                codec = MediaCodec.createDecoderByType(mime);
+            } catch (java.io.IOException | IllegalArgumentException none) {
+                // No H.265 decoder at all is a clear no; every Android device has an H.264 one, so not finding it is unclear.
+                return mime.equals(MediaFormat.MIMETYPE_VIDEO_HEVC) ? Boolean.FALSE : null;
+            }
             MediaCodecInfo.VideoCapabilities video = codec.getCodecInfo().getCapabilitiesForType(mime).getVideoCapabilities();
             return video == null ? null : video.isSizeSupported(width, height);
-        } catch (java.io.IOException | RuntimeException unknown) {
+        } catch (RuntimeException unknown) {
             return null;
         } finally {
             if (codec != null) codec.release();
