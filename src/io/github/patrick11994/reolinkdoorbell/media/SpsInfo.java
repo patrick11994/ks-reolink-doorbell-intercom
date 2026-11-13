@@ -9,7 +9,7 @@ public final class SpsInfo {
     public final int width;
     public final int height;
 
-    private SpsInfo(int width, int height) {
+    SpsInfo(int width, int height) {
         this.width = width;
         this.height = height;
     }
@@ -116,7 +116,7 @@ public final class SpsInfo {
     }
 
     /** Removes emulation-prevention bytes (00 00 03). */
-    private static byte[] unescape(byte[] data) {
+    static byte[] unescape(byte[] data) {
         byte[] out = new byte[data.length];
         int n = 0, zeros = 0;
         for (byte b : data) {
@@ -172,7 +172,7 @@ public final class SpsInfo {
         }
     }
 
-    private static final class Bits {
+    static final class Bits {
         private final byte[] data;
         private int position;
 

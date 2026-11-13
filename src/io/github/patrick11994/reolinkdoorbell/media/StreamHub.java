@@ -4,7 +4,7 @@ package io.github.patrick11994.reolinkdoorbell.media;
 import java.util.Collections;
 
 /**
- * One live doorbell stream over RTSP (H.264 video + AAC audio) for the length of a ring. It starts as soon as the button
+ * One live doorbell stream over RTSP (H.264 or H.265 video + AAC audio) for the length of a ring. It starts as soon as the button
  * is pressed; the FrameHub keeps the frames since the last keyframe for a viewer that attaches later.
  */
 public final class StreamHub implements MediaStream {
@@ -74,9 +74,12 @@ public final class StreamHub implements MediaStream {
             Sdp.Track videoTrack = sdp.receive("video");
             Sdp.Track audioTrack = sdp.receive("audio");
             if (videoTrack == null) throw new java.io.IOException("the doorbell offers no video track");
-            if (videoTrack.codec.equals("H265") || videoTrack.codec.equals("HEVC")) throw new java.io.IOException("the doorbell streams H.265, which the viewer does not decode");
             if (videoTrack.clock > 0) videoClock = videoTrack.clock;
-            H264Depacketizer h264 = new H264Depacketizer(this::onAccessUnit);
+            // H.264, or H.265 as the Video Doorbell WiFi Gen 2 sends its main stream (#17).
+            boolean hevc = videoTrack.codec.equals("H265") || videoTrack.codec.equals("HEVC");
+            H264Depacketizer h264 = hevc ? null : new H264Depacketizer(this::onAccessUnit);
+            H265Depacketizer h265 = hevc ? new H265Depacketizer(this::onAccessUnit) : null;
+            if (hevc) h265.parameterSets(sprop(videoTrack, "sprop-vps"), sprop(videoTrack, "sprop-sps"), sprop(videoTrack, "sprop-pps"));
             int videoChannel = s.setup(videoTrack, 0, Collections.<String, String>emptyMap());
             AacDepacketizer aac = null;
             int audioChannel = -1;
@@ -98,7 +101,8 @@ public final class StreamHub implements MediaStream {
             listener.onStreamState("streaming");
             s.start(new RtspSession.Listener() {
                 @Override public void onPacket(int channel, byte[] buffer, int offset, int length) {
-                    if (channel == vc) h264.onRtp(buffer, offset, length);
+                    if (channel == vc && h264 != null) h264.onRtp(buffer, offset, length);
+                    else if (channel == vc) h265.onRtp(buffer, offset, length);
                     else if (channel == ac && audioDepacketizer != null) audioDepacketizer.onRtp(buffer, offset, length);
                 }
 
@@ -109,6 +113,17 @@ public final class StreamHub implements MediaStream {
         } catch (Exception error) {
             s.close();
             if (running) listener.onStreamState("stream failed: " + (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()));
+        }
+    }
+
+    /** A parameter set from the SDP, without a start code; null when absent or broken. */
+    private static byte[] sprop(Sdp.Track track, String key) {
+        String value = track.fmtp.get(key);
+        if (value == null) return null;
+        try {
+            return java.util.Base64.getDecoder().decode(value.trim());
+        } catch (IllegalArgumentException broken) {
+            return null;  // the stream repeats them before keyframes anyway
         }
     }
 

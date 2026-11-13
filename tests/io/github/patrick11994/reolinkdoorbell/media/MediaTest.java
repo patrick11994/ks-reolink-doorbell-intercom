@@ -27,7 +27,7 @@ public final class MediaTest {
         h264DropsRunawayFrame();
         rtspRefusesHugeAnswers();
         rtspStallAndSilence();
-        rtspH265IsNamed();
+        h265();
         rtspAppStylePath();
         System.out.println("MediaTest passed");
     }
@@ -152,34 +152,47 @@ public final class MediaTest {
         check(sizes.get(sizes.size() - 1), 6);
     }
 
-    /** A doorbell set to H.265 is named as such over RTSP too, rather than fed to the H.264 depacketizer. */
-    static void rtspH265IsNamed() {
-        String sdp = DOORBELL_SDP.replace("H264/90000", "H265/90000");
-        try (java.net.ServerSocket server = new java.net.ServerSocket(0)) {
-            Thread fake = new Thread(() -> {
-                try (java.net.Socket socket = server.accept()) {
-                    java.io.BufferedReader requests = new java.io.BufferedReader(new java.io.InputStreamReader(socket.getInputStream(), java.nio.charset.StandardCharsets.US_ASCII));
-                    java.io.OutputStream out = socket.getOutputStream();
-                    for (int cseq = 1; cseq <= 2; cseq++) {  // OPTIONS, DESCRIBE
-                        for (String line = requests.readLine(); line != null && !line.isEmpty(); line = requests.readLine()) {}
-                        String body = cseq == 2 ? sdp : "";
-                        out.write(("RTSP/1.0 200 OK\r\nCSeq: " + cseq + "\r\nContent-Length: " + body.length() + "\r\n\r\n" + body).getBytes(java.nio.charset.StandardCharsets.US_ASCII));
-                    }
-                    Thread.sleep(1000);
-                } catch (Exception closed) {
-                    // The client gave up, as it should.
-                }
-            });
-            fake.start();
-            java.util.concurrent.CompletableFuture<String> failed = new java.util.concurrent.CompletableFuture<>();
-            StreamHub hub = new StreamHub("127.0.0.1", server.getLocalPort(), "/x", "u", "p", state -> { if (state.startsWith("stream failed")) failed.complete(state); });
-            hub.start();
-            check(failed.get(3, java.util.concurrent.TimeUnit.SECONDS).contains("H.265"), true);
-            hub.stop();
-            fake.join(3000);
-        } catch (Exception e) {
-            throw new AssertionError(e);
-        }
+    /** H.265 over RTP (RFC 7798), as the Video Doorbell WiFi Gen 2 sends its main stream (#17). */
+    static void h265() {
+        // Parameter sets from libx265 for a 640x480 picture.
+        java.util.Base64.Decoder base64 = java.util.Base64.getDecoder();
+        byte[] vps = base64.decode("QAEMAf//BAgAAAMAnggAAAMAAFqVmAk=");
+        byte[] sps = base64.decode("QgEBBAgAAAMAnggAAAMAAFqQAKBAPCyys0kmV4C3AgIABAAAAwAEAAADAAQg");
+        byte[] pps = base64.decode("RAHBcoYMRiQ=");
+        List<String> units = new ArrayList<>();
+        List<byte[]> frames = new ArrayList<>();
+        H265Depacketizer d = new H265Depacketizer((au, ts, key) -> { units.add(ts + ":" + key); frames.add(au); });
+        // The VPS alone, SPS and PPS in an aggregation packet, then an IDR (type 20) in three fragments, marker on the last.
+        d.onRtp(rtp(1, 1000, false, vps), 0, 12 + vps.length);
+        byte[] ap = concat(new byte[] {0x60, 0x01}, new byte[] {0, (byte) sps.length}, sps, new byte[] {0, (byte) pps.length}, pps);
+        d.onRtp(rtp(2, 1000, false, ap), 0, 12 + ap.length);
+        byte[] fuHeader = {0x62, 0x01};  // type 49
+        d.onRtp(rtp(3, 1000, false, concat(fuHeader, new byte[] {(byte) 0x94, 1, 2})), 0, 17);  // start, type 20
+        d.onRtp(rtp(4, 1000, false, concat(fuHeader, new byte[] {0x14, 3})), 0, 16);
+        d.onRtp(rtp(5, 1000, true, concat(fuHeader, new byte[] {0x54, 4})), 0, 16);  // end
+        // A trailing picture (type 1) as a single NAL unit.
+        d.onRtp(rtp(6, 4600, true, new byte[] {0x02, 0x01, 9}), 0, 15);
+        check(units.toString(), "[1000:true, 4600:false]");
+        byte[] key = frames.get(0);
+        check(HevcConfig.is(key), true);
+        HevcConfig config = HevcConfig.of(key);
+        check(config.complete(), true);
+        check(java.util.Arrays.equals(config.sps, sps), true);
+        check(config.size.width + "x" + config.size.height, "640x480");
+        // The fragments joined behind the NAL header they stand for: type 20, the FU's layer and temporal id.
+        check(hex(java.util.Arrays.copyOfRange(key, key.length - 10, key.length)), "00000001280101020304");
+        check(hex(frames.get(1)), "00000001020109");
+        check(HevcConfig.is(frames.get(1)), false);
+        // An H.264 keyframe is not taken for H.265.
+        check(HevcConfig.is(concat(new byte[] {0, 0, 0, 1}, java.util.Base64.getDecoder().decode("Z2QAM6wVFKCgPZA="), new byte[] {0, 0, 0, 1, 0x65, 1})), false);
+
+        // A keyframe without its own parameter sets gets the SDP's in front.
+        List<byte[]> bare = new ArrayList<>();
+        H265Depacketizer fromSdp = new H265Depacketizer((au, ts, k) -> bare.add(au));
+        fromSdp.parameterSets(vps, sps, pps);
+        fromSdp.onRtp(rtp(1, 1000, true, new byte[] {0x28, 0x01, 7}), 0, 15);  // an IDR (type 20) on its own
+        check(HevcConfig.of(bare.get(0)).complete(), true);
+        check(hex(java.util.Arrays.copyOfRange(bare.get(0), bare.get(0).length - 7, bare.get(0).length)), "00000001280107");
     }
 
     /** Firmware that only serves the Reolink app's /Preview_01_sub answers /h264Preview_01_sub with 404 (#13). */

@@ -10,6 +10,7 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import io.github.patrick11994.reolinkdoorbell.media.AvcConfig;
+import io.github.patrick11994.reolinkdoorbell.media.HevcConfig;
 import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
 import io.github.patrick11994.reolinkdoorbell.media.SpsInfo;
 
@@ -86,11 +87,11 @@ final class VideoRenderer implements MediaStream.VideoSink {
      * For the Check button: whether the decoder a call creates can show a picture of this size, or null when it does
      * not say. A decoder that cannot fails at configure, as the Echo Show 8's does with the main stream.
      */
-    static Boolean canPlay(int width, int height) {
+    static Boolean canPlay(String mime, int width, int height) {
         MediaCodec codec = null;
         try {
-            codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
-            MediaCodecInfo.VideoCapabilities video = codec.getCodecInfo().getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).getVideoCapabilities();
+            codec = MediaCodec.createDecoderByType(mime);
+            MediaCodecInfo.VideoCapabilities video = codec.getCodecInfo().getCapabilitiesForType(mime).getVideoCapabilities();
             return video == null ? null : video.isSizeSupported(width, height);
         } catch (java.io.IOException | RuntimeException unknown) {
             return null;
@@ -105,19 +106,31 @@ final class VideoRenderer implements MediaStream.VideoSink {
      * it, null when the test itself gave no clear answer.
      */
     static Boolean decodes(byte[] keyframe) {
-        AvcConfig config = AvcConfig.of(keyframe);
-        if (config.size == null) return null;
-        MediaFormat format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, config.size.width, config.size.height);
-        byte[] sps = config.sps == null ? null : SpsInfo.lowDelay(config.sps);
-        if (config.complete()) {
-            format.setByteBuffer("csd-0", ByteBuffer.wrap(AvcConfig.withStartCode(sps != null ? sps : config.sps)));
-            format.setByteBuffer("csd-1", ByteBuffer.wrap(AvcConfig.withStartCode(config.pps)));
+        MediaFormat format;
+        byte[] data = keyframe;
+        String mime;
+        if (HevcConfig.is(keyframe)) {
+            HevcConfig config = HevcConfig.of(keyframe);
+            if (config.size == null) return null;
+            mime = MediaFormat.MIMETYPE_VIDEO_HEVC;
+            format = MediaFormat.createVideoFormat(mime, config.size.width, config.size.height);
+            if (config.complete()) format.setByteBuffer("csd-0", ByteBuffer.wrap(config.csd()));
+        } else {
+            AvcConfig config = AvcConfig.of(keyframe);
+            if (config.size == null) return null;
+            mime = MediaFormat.MIMETYPE_VIDEO_AVC;
+            format = MediaFormat.createVideoFormat(mime, config.size.width, config.size.height);
+            byte[] sps = config.sps == null ? null : SpsInfo.lowDelay(config.sps);
+            if (config.complete()) {
+                format.setByteBuffer("csd-0", ByteBuffer.wrap(AvcConfig.withStartCode(sps != null ? sps : config.sps)));
+                format.setByteBuffer("csd-1", ByteBuffer.wrap(AvcConfig.withStartCode(config.pps)));
+            }
+            if (sps != null) data = AvcConfig.withSps(keyframe, sps);
         }
-        byte[] data = sps != null ? AvcConfig.withSps(keyframe, sps) : keyframe;
         MediaCodec codec = null;
         try {
             try {
-                codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
+                codec = MediaCodec.createDecoderByType(mime);
             } catch (java.io.IOException | RuntimeException none) {
                 return null;  // no decoder to ask: a call says what goes wrong
             }
@@ -236,24 +249,32 @@ final class VideoRenderer implements MediaStream.VideoSink {
                 }
             }
             if (first == null) return;
-            AvcConfig config = AvcConfig.of(first.data);
-            MediaFormat format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, config.size == null ? 1920 : config.size.width, config.size == null ? 1080 : config.size.height);
+            // H.264, or H.265 as the Video Doorbell WiFi Gen 2 sends its main stream (#17).
+            boolean hevc = HevcConfig.is(first.data);
+            String mime = hevc ? MediaFormat.MIMETYPE_VIDEO_HEVC : MediaFormat.MIMETYPE_VIDEO_AVC;
+            AvcConfig config = hevc ? null : AvcConfig.of(first.data);
+            HevcConfig hevcConfig = hevc ? HevcConfig.of(first.data) : null;
+            SpsInfo size = hevc ? hevcConfig.size : config.size;
+            boolean complete = hevc ? hevcConfig.complete() : config.complete();
+            MediaFormat format = MediaFormat.createVideoFormat(mime, size == null ? 1920 : size.width, size == null ? 1080 : size.height);
             // The doorbell's SPS has no VUI, so a decoder has to allow for reordering and may hold back pictures: the
             // panel's held each keyframe 450 ms. Its frames come in filming order, so the SPS can say there is none.
-            // Every keyframe's SPS is replaced the same way.
-            byte[] spsIn = config.sps, spsOut = config.sps == null ? null : SpsInfo.lowDelay(config.sps);
+            // Every keyframe's SPS is replaced the same way. Only for H.264: an H.265 SPS always says how much it reorders.
+            byte[] spsIn = hevc ? null : config.sps, spsOut = spsIn == null ? null : SpsInfo.lowDelay(spsIn);
             // The parameter sets up front as well as in the stream: older decoders, such as MediaTek's, want them there.
-            if (config.complete()) {
+            if (hevc && complete) {
+                format.setByteBuffer("csd-0", ByteBuffer.wrap(hevcConfig.csd()));
+            } else if (complete) {
                 format.setByteBuffer("csd-0", ByteBuffer.wrap(AvcConfig.withStartCode(spsOut != null ? spsOut : config.sps)));
                 format.setByteBuffer("csd-1", ByteBuffer.wrap(AvcConfig.withStartCode(config.pps)));
             }
             format.setInteger(MediaFormat.KEY_PRIORITY, 0);  // realtime
-            codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC);
+            codec = MediaCodec.createDecoderByType(mime);
             // Low latency only where the decoder offers it: some refuse a format that asks for what they lack.
             boolean lowLatency = false;
             if (Build.VERSION.SDK_INT >= 30) {
                 try {
-                    lowLatency = codec.getCodecInfo().getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
+                    lowLatency = codec.getCodecInfo().getCapabilitiesForType(mime)
                         .isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency);
                 } catch (RuntimeException unknown) {
                     // Treated as not offered.
@@ -261,7 +282,7 @@ final class VideoRenderer implements MediaStream.VideoSink {
                 if (lowLatency) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1);
             }
             listener.onVideoLog("video decoder: " + codec.getName() + (Build.VERSION.SDK_INT >= 29 && !codec.getCodecInfo().isHardwareAccelerated() ? " (software)" : "")
-                + ", " + config.describe() + ", parameter sets " + (config.complete() ? "up front" : "missing from the keyframe")
+                + ", " + (hevc ? hevcConfig.describe() : config.describe()) + ", parameter sets " + (complete ? "up front" : "missing from the keyframe")
                 + (spsOut != null ? ", no reordering added to the SPS" : "")
                 + ", low latency " + (lowLatency ? "on" : "not offered"));
             stage = "configure";
@@ -269,7 +290,7 @@ final class VideoRenderer implements MediaStream.VideoSink {
             stage = "start";
             codec.start();
             stage = "decode";
-            if (config.size != null) listener.onVideoSize(config.size.width, config.size.height);
+            if (size != null) listener.onVideoSize(size.width, size.height);
             boolean warnedTooLarge = false;
             MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
             Frame pending = first;

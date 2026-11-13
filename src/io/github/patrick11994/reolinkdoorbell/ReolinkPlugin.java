@@ -568,7 +568,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                     (path, listener) -> path.equals("RTSP") ? new StreamHub(s.host, 554, s.streamPath, s.username, s.password, listener)
                         : new BaichuanStream(s.host, 9000, s.username, s.password, s.channel, s.streamPath.endsWith("_sub"), listener),
                     new ConnectionCheck.Player() {
-                        @Override public Boolean canPlay(int width, int height) { return VideoRenderer.canPlay(width, height); }
+                        @Override public Boolean canPlay(boolean hevc, int width, int height) {
+                            return VideoRenderer.canPlay(hevc ? android.media.MediaFormat.MIMETYPE_VIDEO_HEVC : android.media.MediaFormat.MIMETYPE_VIDEO_AVC, width, height);
+                        }
                         @Override public Boolean decodes(byte[] keyframe) { return VideoRenderer.decodes(keyframe); }
                     },
                     ReolinkPlugin.this::log, t);

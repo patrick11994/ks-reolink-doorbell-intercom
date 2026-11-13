@@ -12,9 +12,11 @@ import java.util.concurrent.TimeUnit;
 import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanClient;
 import io.github.patrick11994.reolinkdoorbell.baichuan.BaichuanTalk;
 import io.github.patrick11994.reolinkdoorbell.media.AvcConfig;
+import io.github.patrick11994.reolinkdoorbell.media.HevcConfig;
 import io.github.patrick11994.reolinkdoorbell.media.MediaStream;
 import io.github.patrick11994.reolinkdoorbell.media.RtspSession;
 import io.github.patrick11994.reolinkdoorbell.media.Sdp;
+import io.github.patrick11994.reolinkdoorbell.media.SpsInfo;
 import io.github.patrick11994.reolinkdoorbell.onvif.OnvifEvents;
 
 /**
@@ -39,7 +41,7 @@ final class ConnectionCheck {
     /** The panel's video decoder, as a seam for tests. */
     interface Player {
         /** Whether the decoder a call uses can show a picture of this size, or null when it does not say. */
-        Boolean canPlay(int width, int height);
+        Boolean canPlay(boolean hevc, int width, int height);
 
         /** Decodes one keyframe without showing it: true when a picture came out, false when refused, null unclear. */
         Boolean decodes(byte[] keyframe);
@@ -153,12 +155,13 @@ final class ConnectionCheck {
         }
 
         // Whether this panel can play it: the decoder's own answer, or else one picture decoded as a test.
-        AvcConfig config = AvcConfig.of(keyframe);
-        if (config.size != null) {
-            Boolean plays = player.canPlay(config.size.width, config.size.height);
+        boolean hevc = HevcConfig.is(keyframe);
+        SpsInfo picture = hevc ? HevcConfig.of(keyframe).size : AvcConfig.of(keyframe).size;
+        if (picture != null) {
+            Boolean plays = player.canPlay(hevc, picture.width, picture.height);
             if (plays == null) plays = player.decodes(keyframe);
             if (Boolean.FALSE.equals(plays)) {
-                String size = config.size.width + "x" + config.size.height;
+                String size = (hevc ? "H.265, " : "") + picture.width + "x" + picture.height;
                 log.line("check: this device's decoder cannot play " + size);
                 return new Result(false, rtspPath.endsWith("_main") ? texts.checkMainTooLarge(size) : texts.checkVideoTooLarge(size));
             }

@@ -145,7 +145,7 @@ public final class ConnectionCheckTest {
     /** A decoder that answers canPlay, and decodes when asked; each test decode is noted. */
     private static ConnectionCheck.Player player(Boolean canPlay, Boolean decodes, List<String> decoded) {
         return new ConnectionCheck.Player() {
-            @Override public Boolean canPlay(int width, int height) { return canPlay; }
+            @Override public Boolean canPlay(boolean hevc, int width, int height) { return canPlay; }
             @Override public Boolean decodes(byte[] keyframe) {
                 decoded.add(keyframe.length + " bytes");
                 return decodes;
