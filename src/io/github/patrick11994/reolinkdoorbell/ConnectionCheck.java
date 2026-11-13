@@ -116,10 +116,17 @@ final class ConnectionCheck {
             }
         }
         boolean onvifTalk;
+        String noVideo = texts.checkNoVideo();
         RtspSession rtsp = new RtspSession(host, rtspPort, rtspPath, username, password);
         try {
             Sdp sdp = rtsp.describe(Collections.singletonMap("Require", "www.onvif.org/ver20/backchannel"));
-            if (sdp.receive("video") == null && !videoPath.equals("Baichuan")) return new Result(false, texts.checkNoVideo());
+            Sdp.Track video = sdp.receive("video");
+            if (video == null && !videoPath.equals("Baichuan")) return new Result(false, texts.checkNoVideo());
+            if (video != null && (video.codec.equals("H265") || video.codec.equals("HEVC"))) {
+                // RTSP is on, but the viewer plays only H.264: the Video Doorbell WiFi Gen 2 sends its main stream as H.265 (#17).
+                log.line("check: the doorbell sends " + rtspPath + " as H.265");
+                noVideo = rtspPath.endsWith("_main") ? texts.checkMainH265() : texts.checkVideoH265();
+            }
             onvifTalk = sdp.backchannel() != null;
         } catch (IOException error) {
             // Video and talk over Baichuan alone need no RTSP: the steps below find out whether they work.
@@ -134,13 +141,13 @@ final class ConnectionCheck {
         boolean overRtspOnly = false;
         if (videoPath.equals("RTSP")) {
             keyframe = firstPicture(streams, "RTSP", log);
-            if (keyframe == null) return new Result(false, texts.checkNoVideo());
+            if (keyframe == null) return new Result(false, noVideo);
         } else {
             keyframe = firstPicture(streams, "Baichuan", log);
             if (keyframe == null && videoPath.equals("Baichuan")) return new Result(false, texts.checkNoBaichuanVideo());
             if (keyframe == null) {
                 keyframe = firstPicture(streams, "RTSP", log);
-                if (keyframe == null) return new Result(false, texts.checkNoVideo());
+                if (keyframe == null) return new Result(false, noVideo);
                 overRtspOnly = true;
             }
         }

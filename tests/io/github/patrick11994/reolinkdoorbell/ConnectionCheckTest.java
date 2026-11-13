@@ -101,6 +101,11 @@ public final class ConnectionCheckTest {
         opened.clear();
         check(doorbell(BaichuanTalkTest.ABILITY, video, MAIN, "RTSP", "Automatic", requests, streams(opened, "RTSP"), PLAYS, english), english.checkOk());
         check(opened.toString(), "[RTSP]");
+        // RTSP is on, but the stream is H.265, as the Gen 2's main stream (#17): say which Video to pick, not to turn on RTSP.
+        String hevc = video.replace("H264/90000", "H265/90000");
+        check(doorbell(BaichuanTalkTest.ABILITY, hevc, MAIN, "Automatic", "Automatic", requests, streams(opened), PLAYS, english), english.checkMainH265());
+        check(english.checkMainH265().contains("Sub (light)"), true);
+        check(doorbell(BaichuanTalkTest.ABILITY, hevc, "/h264Preview_01_sub", "RTSP", "Automatic", requests, streams(opened), PLAYS, english), english.checkVideoH265());
 
         // A device that cannot play the picture: the check says so, and which stream to pick instead. The decoder's own
         // answer counts first; when it gives none, one decoded picture decides; when that is unclear too, it passes.
