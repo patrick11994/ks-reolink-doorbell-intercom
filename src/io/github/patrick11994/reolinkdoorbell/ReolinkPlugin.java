@@ -625,8 +625,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             if (!state.equals("connecting") && !state.equals("streaming")) log("video: " + state + " (Baichuan)");
             if (state.equals("streaming")) streamDelivers(generation);
             FallbackStream f = fallback[0];
-            if (state.startsWith("stream failed") && f != null && !f.usingFallback() && !state.contains("H.265")) {
-                // Reported on the Baichuan stream's own thread; switching stops that stream and waits for it.
+            if (state.startsWith("stream failed") && f != null && !f.usingFallback()) {
+                // Reported on the Baichuan stream's own thread; switching stops that stream and waits for it. H.265 too:
+                // Baichuan video does not take it, RTSP does.
                 releaseLater(() -> {
                     if (f.primaryFailed()) log("video: falling back to RTSP");
                     else streamLost(generation);

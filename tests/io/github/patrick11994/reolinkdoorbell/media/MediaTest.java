@@ -193,6 +193,13 @@ public final class MediaTest {
         fromSdp.onRtp(rtp(1, 1000, true, new byte[] {0x28, 0x01, 7}), 0, 15);  // an IDR (type 20) on its own
         check(HevcConfig.of(bare.get(0)).complete(), true);
         check(hex(java.util.Arrays.copyOfRange(bare.get(0), bare.get(0).length - 7, bare.get(0).length)), "00000001280107");
+
+        // RFC 7798 allows several parameter sets of a kind, comma-separated: the first is taken.
+        Sdp.Track track = new Sdp.Track("video");
+        String encoded = java.util.Base64.getEncoder().encodeToString(sps);
+        track.fmtp.put("sprop-sps", encoded + "," + encoded);
+        check(java.util.Arrays.equals(StreamHub.sprop(track, "sprop-sps"), sps), true);
+        check(StreamHub.sprop(track, "sprop-vps") == null, true);
     }
 
     /** Firmware that only serves the Reolink app's /Preview_01_sub answers /h264Preview_01_sub with 404 (#13). */

@@ -116,12 +116,12 @@ public final class StreamHub implements MediaStream {
         }
     }
 
-    /** A parameter set from the SDP, without a start code; null when absent or broken. */
-    private static byte[] sprop(Sdp.Track track, String key) {
+    /** A parameter set from the SDP, without a start code; the first of a comma list; null when absent or broken. */
+    static byte[] sprop(Sdp.Track track, String key) {
         String value = track.fmtp.get(key);
         if (value == null) return null;
         try {
-            return java.util.Base64.getDecoder().decode(value.trim());
+            return java.util.Base64.getDecoder().decode(value.split(",")[0].trim());
         } catch (IllegalArgumentException broken) {
             return null;  // the stream repeats them before keyframes anyway
         }

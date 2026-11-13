@@ -107,7 +107,14 @@ public final class ConnectionCheckTest {
         List<String> asked = new CopyOnWriteArrayList<>();
         check(doorbell(BaichuanTalkTest.ABILITY, hevc, MAIN, "RTSP", "Automatic", requests, streams(HEVC_KEYFRAME, opened, "RTSP"), hevcPlayer(true, asked), english), english.checkOk());
         check(asked.toString(), "[H.265 640x480]");
+        asked.clear();
         check(doorbell(BaichuanTalkTest.ABILITY, hevc, MAIN, "RTSP", "Automatic", requests, streams(HEVC_KEYFRAME, opened, "RTSP"), hevcPlayer(false, asked), english), english.checkMainTooLarge("H.265, 640x480"));
+        check(asked.toString(), "[H.265 640x480]");
+        // An SPS that cannot be read still asks whether there is an H.265 decoder at all.
+        byte[] unreadable = concat(new byte[] {0, 0, 0, 1}, java.util.Base64.getDecoder().decode("QAEMAf//BAgAAAMAnggAAAMAAFqVmAk="),
+            new byte[] {0, 0, 0, 1, 0x42, 0x01, 0x01}, new byte[] {0, 0, 0, 1, 0x28, 0x01, 7});
+        check(doorbell(BaichuanTalkTest.ABILITY, hevc, MAIN, "RTSP", "Automatic", requests, streams(unreadable, opened, "RTSP"), hevcPlayer(false, asked), english), english.checkMainTooLarge("H.265"));
+        check(doorbell(BaichuanTalkTest.ABILITY, hevc, MAIN, "RTSP", "Automatic", requests, streams(unreadable, opened, "RTSP"), hevcPlayer(true, asked), english), english.checkOk());
 
         // A device that cannot play the picture: the check says so, and which stream to pick instead. The decoder's own
         // answer counts first; when it gives none, one decoded picture decides; when that is unclear too, it passes.

@@ -152,6 +152,11 @@ final class ConnectionCheck {
         // Doorbell WiFi Gen 2 sends its main stream as H.265 (#17), which a device without an H.265 decoder cannot play.
         boolean hevc = HevcConfig.is(keyframe);
         SpsInfo picture = hevc ? HevcConfig.of(keyframe).size : AvcConfig.of(keyframe).size;
+        if (picture == null && hevc && Boolean.FALSE.equals(player.canPlay(true, 640, 480))) {
+            // An SPS this check cannot read: still, a device without any H.265 decoder cannot play it.
+            log.line("check: this device has no H.265 decoder");
+            return new Result(false, rtspPath.endsWith("_main") ? texts.checkMainTooLarge("H.265") : texts.checkVideoTooLarge("H.265"));
+        }
         if (picture != null) {
             Boolean plays = player.canPlay(hevc, picture.width, picture.height);
             if (plays == null) plays = player.decodes(keyframe);
