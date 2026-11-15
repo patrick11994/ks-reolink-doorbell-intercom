@@ -765,7 +765,7 @@ final class DoorbellView extends FrameLayout {
         this.speakerOn = speakerOn;
         this.micOn = micOn;
         if (changed && arranged && followsState()) {
-            relayout();  // cards and buttons that show only while ringing or in a call: the layout follows
+            stateChange();  // cards and buttons that show only while ringing or in a call
         } else {
             render();
         }
@@ -804,7 +804,11 @@ final class DoorbellView extends FrameLayout {
         callHolders.clear();
         List<Cards.Card> shown = visibleCallButtons();
         List<View> views = new ArrayList<>();
-        for (Cards.Card button : shown) views.add(callButton(button));
+        for (Cards.Card button : shown) {
+            View view = callButton(button);
+            view.setTransitionName("call:" + button.role + ":" + button.row);  // the same button before and after a change
+            views.add(view);
+        }
         int wrap = LinearLayout.LayoutParams.WRAP_CONTENT, fill = LinearLayout.LayoutParams.MATCH_PARENT;
         boolean usual = shown.size() == 3 && shown.get(0).role == Cards.Role.ANSWER && shown.get(1).role == Cards.Role.SPEAKER
             && shown.get(2).role == Cards.Role.HANG_UP;
@@ -1208,6 +1212,98 @@ final class DoorbellView extends FrameLayout {
         render();
     }
 
+    /**
+     * Cards and buttons that show only while ringing or in a call came or went: the ones that stay slide to their new
+     * places while the others fade in or out, instead of the screen jumping. A landscape column that comes or goes
+     * rearranges at once.
+     */
+    private void stateChange() {
+        if (talking) {
+            render();  // waits for Hold to talk to be let go
+            return;
+        }
+        if (landscape) {
+            boolean right = cardsFitRight(getHeight());
+            boolean leftColumn = !visibleCards().isEmpty() && !right;
+            if (right != cardsRight || leftColumn != (cardSide.getParent() != null)) {
+                relayout();
+                return;
+            }
+        }
+        Map<String, View> before = named();
+        Map<String, int[]> places = new HashMap<>();
+        for (Map.Entry<String, View> entry : before.entrySet()) places.put(entry.getKey(), placeOf(entry.getValue()));
+        columnLevel = 0;
+        buttonDp = landscape ? buttonDpFor(true, getHeight(), cardsRight) : rowButtonDp(getWidth(), overlay ? OVERLAY_BUTTON_DP : 76);
+        buildCards();
+        render();
+        animateFrom(before, places);
+    }
+
+    private static final long MOVE_MILLIS = 250;
+
+    /**
+     * Once the new buttons and cards are laid out, before they are drawn: each one that was there before starts at its
+     * old place and slides to its new one, a new one fades in, and one that went fades out where it was. They are
+     * built anew, so they are matched by name (setTransitionName). The picture stays put.
+     */
+    private void animateFrom(Map<String, View> before, Map<String, int[]> places) {
+        getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+            @Override public boolean onPreDraw() {
+                getViewTreeObserver().removeOnPreDrawListener(this);
+                android.view.animation.Interpolator ease = new android.view.animation.DecelerateInterpolator();
+                Map<String, View> after = named();
+                for (Map.Entry<String, View> entry : after.entrySet()) {
+                    View view = entry.getValue();
+                    int[] was = places.get(entry.getKey());
+                    if (was == null) {
+                        view.setAlpha(0f);
+                        view.animate().alpha(1f).setDuration(MOVE_MILLIS).start();
+                        continue;
+                    }
+                    int[] now = placeOf(view);
+                    if (was[0] == now[0] && was[1] == now[1]) continue;
+                    view.setTranslationX(was[0] - now[0]);
+                    view.setTranslationY(was[1] - now[1]);
+                    view.animate().translationX(0f).translationY(0f).setDuration(MOVE_MILLIS).setInterpolator(ease).start();
+                }
+                for (Map.Entry<String, View> entry : before.entrySet()) {
+                    View gone = entry.getValue();
+                    if (after.containsKey(entry.getKey()) || gone.getParent() != null) continue;
+                    int[] was = places.get(entry.getKey());
+                    gone.layout(was[0], was[1], was[0] + gone.getWidth(), was[1] + gone.getHeight());
+                    getOverlay().add(gone);
+                    gone.animate().alpha(0f).setDuration(MOVE_MILLIS).withEndAction(() -> getOverlay().remove(gone)).start();
+                }
+                return true;
+            }
+        });
+    }
+
+    /** The cards and call buttons now on screen, by their transition names. */
+    private Map<String, View> named() {
+        Map<String, View> found = new HashMap<>();
+        collectNamed(this, found);
+        return found;
+    }
+
+    private static void collectNamed(View view, Map<String, View> into) {
+        String name = view.getTransitionName();
+        if (name != null && view.isShown()) into.put(name, view);
+        if (view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) collectNamed(group.getChildAt(i), into);
+        }
+    }
+
+    /** Where a view sits in this one, its translation left out: so a move still running does not count. */
+    private int[] placeOf(View view) {
+        int[] mine = new int[2], its = new int[2];
+        getLocationInWindow(mine);
+        view.getLocationInWindow(its);
+        return new int[] {its[0] - mine[0] - Math.round(view.getTranslationX()), its[1] - mine[1] - Math.round(view.getTranslationY())};
+    }
+
     /** A Home Assistant entity's new snapshot, from the plugin's subscription. */
     void entityChanged(String entityId, Map<?, ?> snapshot) {
         snapshots.put(entityId, snapshot);
@@ -1248,6 +1344,7 @@ final class DoorbellView extends FrameLayout {
             cardBox.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
             for (int i = 0; i < shown.size(); i++) {
                 CardHolder holder = new CardHolder(getContext(), shown.get(i), true, 0, false);
+                holder.root.setTransitionName("card:" + shown.get(i).list + ":" + shown.get(i).row);
                 cardHolders.add(holder);
                 LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(theme.px(ROUND_CARD_DP), theme.px(ROUND_CARD_DP));
                 if (i > 0) params.leftMargin = theme.px(16);
@@ -1273,6 +1370,7 @@ final class DoorbellView extends FrameLayout {
                 cardBox.addView(row, rowParams);
             }
             CardHolder holder = new CardHolder(getContext(), tiles.get(i), false, 0, false);
+            holder.root.setTransitionName("card:" + tiles.get(i).list + ":" + tiles.get(i).row);
             cardHolders.add(holder);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, theme.px(64), 1);
             if (i % perRow > 0) params.leftMargin = gap;
@@ -1298,6 +1396,7 @@ final class DoorbellView extends FrameLayout {
                 cardBox.addView(row, rowParams);
             }
             View button = roundButton(rounds.get(i), size, cardHolders);
+            button.setTransitionName("card:" + rounds.get(i).list + ":" + rounds.get(i).row);
             row.addView(button, new LinearLayout.LayoutParams(cell, LinearLayout.LayoutParams.WRAP_CONTENT));
         }
     }
