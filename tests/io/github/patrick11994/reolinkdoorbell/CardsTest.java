@@ -42,6 +42,9 @@ public final class CardsTest {
         check(styledCard.shownWhen(RingController.State.RINGING), false);
         check(styledCard.shownWhen(RingController.State.LISTENING), true);
         check(styledCard.shownWhen(RingController.State.IN_CALL), true);
+        styled.remove("color");  // Fixed colour without a colour saved: the setting's own default, not the state
+        check(Integer.toHexString(Cards.parse(Collections.singletonList(styled)).get(0).color), "ff2e7d32");
+        styled.put("color", "#2E7D32");
         styled.put("colorMode", "Follow the state");  // the colour stays saved, but is not used
         check(Cards.parse(Collections.singletonList(styled)).get(0).color, 0);
         styled.put("show", "While ringing");
@@ -65,6 +68,10 @@ public final class CardsTest {
         check(buttons.get(1).actionPath(), "callButtons.1.action");
         check(buttons.get(1).confirm, true);
         check(Cards.parseCallButtons(null), Cards.DEFAULT_CALL_BUTTONS);
+        // Kiosk Satellite's own limit on a list is the only one.
+        List<Object> many = new ArrayList<>();
+        for (int i = 0; i < 40; i++) many.add(row("Card " + i, "", "light.porch", action(), false));
+        check(Cards.parse(many).size(), Cards.MAX);
         check(Cards.parseCallButtons(Collections.emptyList()).size(), 0);  // all removed: the viewer shows a close button
         check(Cards.parse(null).size(), 0);
         check(Cards.parse("junk").size(), 0);

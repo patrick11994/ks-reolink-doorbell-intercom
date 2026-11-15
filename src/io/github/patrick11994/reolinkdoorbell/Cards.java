@@ -69,6 +69,11 @@ final class Cards {
         boolean hasEntity() {
             return !entityId.isEmpty();
         }
+
+        /** Everything the viewer draws from, so it can tell a settings save that changed nothing here. */
+        String key() {
+            return list + "|" + row + "|" + role + "|" + label + "|" + icon + "|" + entityId + "|" + action + "|" + confirm + "|" + button + "|" + color + "|" + show;
+        }
     }
 
     /** The accent a card's icon takes, following Home Assistant's state colours. */
@@ -144,9 +149,9 @@ final class Cards {
         return Collections.unmodifiableList(buttons);
     }
 
-    /** The fixed colour of a card whose Colour is "Fixed colour", as 0xFFRRGGBB; 0 to follow the state. */
+    /** The fixed colour of a card whose Colour is "Fixed colour", as 0xFFRRGGBB (the manifest's green without one); 0 follows the state. */
     static int color(Map<?, ?> row) {
-        return text(row.get("colorMode")).startsWith("Fixed") ? hex(text(row.get("color")), 0) : 0;
+        return text(row.get("colorMode")).startsWith("Fixed") ? hex(text(row.get("color")), 0xFF2E7D32) : 0;
     }
 
     /** #RRGGBB as 0xFFRRGGBB, or fallback when it is not one. */

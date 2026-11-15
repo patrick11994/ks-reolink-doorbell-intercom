@@ -105,6 +105,9 @@ final class DoorbellView extends FrameLayout {
     // down in the landscape column. Until then they shrink, so all of them show as long as they can.
     private final android.widget.HorizontalScrollView buttonRow;
     private final ScrollView buttonColumn;
+    // Landscape, last resort: the column has no room left even at the smallest size, so the buttons' part takes what
+    // is left of its height and scrolls (a LinearLayout gives a later child no less room for a spacer above it).
+    private boolean columnScrolls;
     static final int COLUMN_BOTTOM = 0, COLUMN_CENTRE = 1, COLUMN_TOP = 2;
     private int columnPosition = COLUMN_BOTTOM;  // landscape: where the buttons and cards sit in their columns
     private final View spacerEnd;  // landscape: the room below the controls, for a centred or top column
@@ -144,6 +147,7 @@ final class DoorbellView extends FrameLayout {
     private boolean voiceGoesOut = true;  // the microphone is live and talk is open, as the plugin last reported
     private boolean renderPending;  // the buttons changed while Hold to talk was held
     private boolean arrangePending, pendingWide;  // the layout changed while Hold to talk was held
+    private boolean stateChangePending;  // cards or buttons with Show changed while Hold to talk was held
     private long talkDownAt;
     private boolean chipNote;  // the chip says something else for a while: how push to talk works, or a problem
     private static final long SHORT_TAP_MILLIS = 400;
@@ -276,6 +280,7 @@ final class DoorbellView extends FrameLayout {
             cardsRight = right;
             overlay = square;
             columnLevel = 0;
+            columnScrolls = false;
             post(() -> {
                 arrange(wide);
                 applyPadding();
@@ -297,13 +302,14 @@ final class DoorbellView extends FrameLayout {
         if (widthPx <= 0) return usual;
         float widthDp = widthPx / (theme.px(1000) / 1000f) - 48;  // the row's side padding
         int count = Math.max(1, visibleCallButtons().size());
-        return Math.max(48, Math.min(usual, Math.round(widthDp / count - 16 - 8)));  // each: ring room 16 and a little air
+        // Each button's frame is its circle and 16 dp of ring room, as it always was: rounded down, so they fit.
+        return Math.max(48, Math.min(usual, (int) Math.floor(widthDp / count - 16)));
     }
 
     /** Whether the row's buttons, at their size, are wider together than the row: then each keeps its own width. */
     private boolean rowOverflows() {
         float widthDp = getWidth() / (theme.px(1000) / 1000f) - 48;
-        return visibleCallButtons().size() * (buttonDp + 16 + 8) > widthDp;
+        return visibleCallButtons().size() * (buttonDp + 16) > widthDp + 0.5f;
     }
 
     /** The landscape column's height left for the buttons and cards: less the name, the padding, the volume slider. */
@@ -313,14 +319,14 @@ final class DoorbellView extends FrameLayout {
         return heightPx / (theme.px(1000) / 1000f) - 54 - 48 - 64;
     }
 
-    /** The landscape cards' height: a row for each tile, and the round Button-style ones two to a row. */
+    /** The landscape cards' height: a row for each tile and, as the narrowest column has room for one, each round one. */
     private float cardsDp() {
         int round = 0, all = 0;
         for (Cards.Card card : visibleCards()) {
             all++;
             if (card.button) round++;
         }
-        return (all - round) * (CARD_DP + CARD_GAP_DP) + (round + 1) / 2 * (LOW_BUTTON_DP + 16 + 22 + CARD_GAP_DP) + 4;
+        return (all - round) * (CARD_DP + CARD_GAP_DP) + round * (LOW_BUTTON_DP + 16 + 22 + CARD_GAP_DP) + 4;
     }
 
     /** The cards this state of the call shows. */
@@ -386,13 +392,13 @@ final class DoorbellView extends FrameLayout {
             title.setGravity(Gravity.CENTER);
             side.addView(title, new LinearLayout.LayoutParams(fill, wrap));
             // Landscape column setting: the controls at the bottom (the room above them), centred, or at the top.
-            if (columnPosition != COLUMN_TOP) side.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1));
+            if (columnPosition != COLUMN_TOP && !columnScrolls) side.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1));
             side.addView(hint, hintParams());
             if (cardsRight) side.addView(cardBox, new LinearLayout.LayoutParams(fill, wrap));
             side.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
             buttonColumn.addView(buttons, new ScrollView.LayoutParams(fill, wrap));
-            side.addView(buttonColumn, new LinearLayout.LayoutParams(fill, wrap));
-            if (columnPosition != COLUMN_BOTTOM) side.addView(spacerEnd, new LinearLayout.LayoutParams(1, 0, 1));
+            side.addView(buttonColumn, columnScrolls ? new LinearLayout.LayoutParams(fill, 0, 1) : new LinearLayout.LayoutParams(fill, wrap));
+            if (columnPosition != COLUMN_BOTTOM && !columnScrolls) side.addView(spacerEnd, new LinearLayout.LayoutParams(1, 0, 1));
             buttons.setOrientation(LinearLayout.VERTICAL);
             addView(side, new LayoutParams(columnPx, LayoutParams.MATCH_PARENT, Gravity.END));
             cardBox.setGravity(Gravity.TOP);
@@ -954,11 +960,15 @@ final class DoorbellView extends FrameLayout {
             applyPadding();
         } else if (columnLevel < 2) {
             columnLevel++;
-            buttonDp = LOW_BUTTON_DP;
+            buttonDp = Math.min(buttonDp, LOW_BUTTON_DP);
         } else if (buttonDp > 48) {
             buttonDp = 48;
+        } else if (!columnScrolls) {
+            columnScrolls = true;  // as small as it goes: the buttons scroll in their part of the column
+            arrange(true);
+            applyPadding();
         } else {
-            return;  // as small as it goes
+            return;
         }
         render();
     }
@@ -1009,7 +1019,11 @@ final class DoorbellView extends FrameLayout {
         column.setOnClickListener(null);
         column.setOnTouchListener((v, event) -> {
             switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN: setTalking(true, circle); return true;
+                case MotionEvent.ACTION_DOWN:
+                    // A scrolling row would take a sideways drift for a scroll and cancel the hold: talk stopped.
+                    if (v.getParent() != null) v.getParent().requestDisallowInterceptTouchEvent(true);
+                    setTalking(true, circle);
+                    return true;
                 case MotionEvent.ACTION_UP:
                 case MotionEvent.ACTION_CANCEL: setTalking(false, circle); return true;
                 default: return true;
@@ -1039,7 +1053,16 @@ final class DoorbellView extends FrameLayout {
         if (now) removeCallbacks(hideControls);  // never hide what the finger is on
         else scheduleHide();
         safely(() -> callback.holdToTalk(now));
-        if (!now && arrangePending) {
+        if (!now && stateChangePending) {
+            stateChangePending = false;
+            renderPending = false;
+            if (arrangePending) {
+                arrangePending = false;
+                arrange(pendingWide);
+                applyPadding();
+            }
+            stateChange();
+        } else if (!now && arrangePending) {
             arrangePending = false;
             renderPending = false;
             arrange(pendingWide);
@@ -1177,14 +1200,22 @@ final class DoorbellView extends FrameLayout {
 
     /** The cards from the settings; a change of cards rearranges, since landscape gives them a column only if any. */
     void setCards(List<Cards.Card> cards) {
+        boolean same = keyOf(cards).equals(keyOf(this.cards));
         this.cards = cards;
-        relayout();
+        if (!same) relayout();  // a save of other settings leaves the cards, and a hold on one, alone
     }
 
     /** The call buttons from the settings, in the user's order. */
     void setCallButtons(List<Cards.Card> buttons) {
+        boolean same = keyOf(buttons).equals(keyOf(callButtons));
         callButtons = buttons;
-        relayout();
+        if (!same) relayout();
+    }
+
+    private static String keyOf(List<Cards.Card> list) {
+        StringBuilder key = new StringBuilder();
+        for (Cards.Card card : list) key.append(card.key()).append('\n');
+        return key.toString();
     }
 
     /** The landscape column setting: COLUMN_BOTTOM, COLUMN_CENTRE or COLUMN_TOP. */
@@ -1201,6 +1232,7 @@ final class DoorbellView extends FrameLayout {
             return;
         }
         columnLevel = 0;
+        columnScrolls = false;
         if (landscape) {
             cardsRight = cardsFitRight(getHeight());
             buttonDp = buttonDpFor(true, getHeight(), cardsRight);
@@ -1219,7 +1251,7 @@ final class DoorbellView extends FrameLayout {
      */
     private void stateChange() {
         if (talking) {
-            render();  // waits for Hold to talk to be let go
+            stateChangePending = true;  // all of it waits for Hold to talk to be let go
             return;
         }
         if (landscape) {
@@ -1230,14 +1262,17 @@ final class DoorbellView extends FrameLayout {
                 return;
             }
         }
-        Map<String, View> before = named();
+        // A second change before the first was drawn: its views have no places yet, so this one just rebuilds.
+        boolean animate = !animationPending;
+        Map<String, View> before = animate ? named() : new HashMap<>();
         Map<String, int[]> places = new HashMap<>();
         for (Map.Entry<String, View> entry : before.entrySet()) places.put(entry.getKey(), placeOf(entry.getValue()));
-        columnLevel = 0;
-        buttonDp = landscape ? buttonDpFor(true, getHeight(), cardsRight) : rowButtonDp(getWidth(), overlay ? OVERLAY_BUTTON_DP : 76);
+        // A row's button size follows how many it holds; the landscape column keeps its fitting level, which fitColumn
+        // takes further if the buttons need it, instead of starting over and jumping.
+        if (!landscape) buttonDp = rowButtonDp(getWidth(), overlay ? OVERLAY_BUTTON_DP : 76);
         buildCards();
         render();
-        animateFrom(before, places);
+        if (animate) animateFrom(before, places);
     }
 
     private static final long MOVE_MILLIS = 250;
@@ -1247,18 +1282,27 @@ final class DoorbellView extends FrameLayout {
      * old place and slides to its new one, a new one fades in, and one that went fades out where it was. They are
      * built anew, so they are matched by name (setTransitionName). The picture stays put.
      */
+    private boolean animationPending;  // animateFrom waits for the first draw of the rebuilt views
+
     private void animateFrom(Map<String, View> before, Map<String, int[]> places) {
-        getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+        // Removed from the observer it was added to: a viewer closed before the next draw has another one by then, and
+        // the listener would stay on the host's window.
+        android.view.ViewTreeObserver observer = getViewTreeObserver();
+        animationPending = true;
+        observer.addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
             @Override public boolean onPreDraw() {
-                getViewTreeObserver().removeOnPreDrawListener(this);
+                if (observer.isAlive()) observer.removeOnPreDrawListener(this);
+                animationPending = false;
+                if (!isAttachedToWindow()) return true;
                 android.view.animation.Interpolator ease = new android.view.animation.DecelerateInterpolator();
                 Map<String, View> after = named();
                 for (Map.Entry<String, View> entry : after.entrySet()) {
                     View view = entry.getValue();
                     int[] was = places.get(entry.getKey());
                     if (was == null) {
+                        float own = view.getAlpha();  // a dimmed card (unavailable, or running) stays dimmed
                         view.setAlpha(0f);
-                        view.animate().alpha(1f).setDuration(MOVE_MILLIS).start();
+                        view.animate().alpha(own).setDuration(MOVE_MILLIS).start();
                         continue;
                     }
                     int[] now = placeOf(view);
@@ -1269,7 +1313,8 @@ final class DoorbellView extends FrameLayout {
                 }
                 for (Map.Entry<String, View> entry : before.entrySet()) {
                     View gone = entry.getValue();
-                    if (after.containsKey(entry.getKey()) || gone.getParent() != null) continue;
+                    // Gone from the screen, though maybe still in a row that was let go: the overlay takes it from there.
+                    if (after.containsKey(entry.getKey()) || gone.isAttachedToWindow()) continue;
                     int[] was = places.get(entry.getKey());
                     gone.layout(was[0], was[1], was[0] + gone.getWidth(), was[1] + gone.getHeight());
                     getOverlay().add(gone);
@@ -1617,6 +1662,7 @@ final class DoorbellView extends FrameLayout {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     cancelHold();
+                    if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);  // a scrolling row must not cancel the hold
                     animator = ValueAnimator.ofFloat(0f, 1f);
                     animator.setDuration(HOLD_MILLIS);
                     animator.addUpdateListener(a -> {
@@ -1683,6 +1729,7 @@ final class DoorbellView extends FrameLayout {
     @Override public boolean onInterceptTouchEvent(MotionEvent event) {
         if (event.getActionMasked() != MotionEvent.ACTION_DOWN) return false;
         safely(callback::touched);
+        if (inside(close, event)) return false;  // the way out works at once, even with the controls hidden
         if (controlsHidden) {
             // Like FaceTime: the first tap only brings the controls back, a second one on End call hangs up.
             setControlsHidden(false);
