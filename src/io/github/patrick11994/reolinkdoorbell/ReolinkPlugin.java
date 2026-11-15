@@ -139,6 +139,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 if (h == null) return;
                 try {
                     h.updateSettings(Collections.<String, Object>singletonMap("wakeWordRestore", mutedByUs));
+                    ReolinkPlugin.this.remember("wakeWordRestore", mutedByUs);
                 } catch (RuntimeException | LinkageError older) {
                     // Without it, only a crash mid-call could leave the wake word muted.
                 }
@@ -164,6 +165,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 if (h == null) return;
                 try {
                     h.updateSettings(Collections.<String, Object>singletonMap("musicRestore", pausedByUs));
+                    ReolinkPlugin.this.remember("musicRestore", pausedByUs);
                 } catch (RuntimeException | LinkageError older) {
                     // Without it, only a stop mid-call could leave the music paused.
                 }
@@ -187,7 +189,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     @Override public void configure(Map<String, Object> values) {
         Settings previous = settings;
         settings = new Settings(values);
-        this.values = new HashMap<>(values);
+        synchronized (valuesLock) {
+            this.values = new HashMap<>(values);
+        }
         baichuanTalkRefused = false;
         baichuanVideoFailed = false;
         texts = Texts.of(settings.language);
@@ -335,21 +339,36 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         client.start();
     }
 
-    private boolean visitorBefore;  // the doorbell's visitor state as last reported, for a press with ringing off
+    // A press while Ring on this device was off: kept from the controller until the doorbell lets go of it, so
+    // switching ringing on in the middle neither rings halfway nor counts the press twice. Guarded by visitorLock,
+    // never by the plugin's own lock: the controller calls back into that one while holding its own.
+    private final Object visitorLock = new Object();
+    private boolean visitorBefore, silenced;
+    private long silencedAt;
 
     /**
      * The doorbell's visitor state, from Baichuan or ONVIF. Ring on this device (#19) off: no chime, screen or call
      * screen on this panel, only Last ring (published by the caller) and the Doorbell pressed trigger, once a press.
      * The controller then does not see the press at all, so it neither rings nor counts a missed ring.
      */
-    private synchronized void visitor(RingController c, boolean visitor) {
-        boolean press = visitor && !visitorBefore;
-        visitorBefore = visitor;
-        if (settings.ring || !visitor) {
-            c.onVisitor(visitor);
-            return;
+    private void visitor(RingController c, boolean visitor) {
+        boolean silentPress = false, pass;
+        synchronized (visitorLock) {
+            long now = System.nanoTime() / 1_000_000;
+            // As the controller does: a press held past 20 s, or whose release went missing, counts again.
+            boolean press = visitor && (!visitorBefore || now - silencedAt > RingController.REPEAT_MILLIS);
+            visitorBefore = visitor;
+            if (!visitor) silenced = false;
+            if (press && !settings.ring) {
+                silenced = true;
+                silencedAt = now;
+                silentPress = true;
+            }
+            pass = !silenced;
         }
-        if (press) {
+        if (pass) {
+            c.onVisitor(visitor);
+        } else if (silentPress) {
             log("ring: off on this device (Ring on this device), so only Last ring and Doorbell pressed");
             fireTrigger("doorbellPressed");
         }
@@ -977,6 +996,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         if (h == null) return;
         try {
             h.updateSettings(Collections.<String, Object>singletonMap("callVolume", (double) percent));
+            remember("callVolume", (double) percent);
         } catch (RuntimeException | LinkageError older) {
             // Older Kiosk Satellite: the level holds for this call only.
         }
@@ -1090,8 +1110,20 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }
     }
 
-    // The settings as Kiosk Satellite last handed them over: a control from Home Assistant changes one and saves it.
+    // The settings as Kiosk Satellite last handed them over, with what the plugin saved itself since: a control from
+    // Home Assistant changes one and applies them all, so they must hold the call volume the slider saved, too.
     private volatile Map<String, Object> values = new HashMap<>();
+    private final Object valuesLock = new Object();
+
+    /** A setting the plugin saved itself (updateSettings does not call configure): in values, and the new values. */
+    private Map<String, Object> remember(String key, Object value) {
+        synchronized (valuesLock) {
+            Map<String, Object> changed = new HashMap<>(values);
+            changed.put(key, value);
+            values = changed;
+            return changed;
+        }
+    }
     // Entity keys (lowercase and underscores only, as Kiosk Satellite requires) and the settings they stand for.
     static final Map<String, String> CONTROLS = new HashMap<>();
     static {
@@ -1112,8 +1144,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             h.publishSwitch("chime", t.chimeControl(), s.chime);
             h.publishSwitch("wake_screen", t.wakeControl(), s.wakeScreen);
             h.publishNumber("chime_volume", t.chimeVolumeControl(), chimeVolumeRange(), (double) s.chimeVolume);
-        } catch (UnsupportedOperationException older) {
-            // A Kiosk Satellite without writable entities: the settings page still has them.
+        } catch (UnsupportedOperationException | LinkageError older) {
+            // A Kiosk Satellite without writable entities (an older one lacks the method itself): the settings page has them.
         } catch (RuntimeException refused) {
             log("controls: " + refused.getMessage());
         }
@@ -1134,7 +1166,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
      * Home Assistant changed a control: saved as the plugin setting it stands for, then applied the way a change on
      * the settings page is, which publishes the applied state back. A setting is the one value, so the two never differ.
      */
-    private synchronized void control(String event, Map<String, Object> payload) {
+    private void control(String event, Map<String, Object> payload) {
         PluginHost h = host;
         if (h == null) return;
         String key = CONTROLS.get(event.substring(event.indexOf('.') + 1));
@@ -1149,17 +1181,16 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         } else {
             return;
         }
-        Map<String, Object> changed = new HashMap<>(values);
-        changed.put(key, value);
+        // Outside the plugin's lock: configure reaches the controller, which calls back into that lock itself.
         try {
             h.updateSettings(Collections.singletonMap(key, value));
-        } catch (RuntimeException failed) {
+        } catch (RuntimeException | LinkageError failed) {
             log("controls: " + key + " not saved: " + failed.getMessage());
             publishControls();  // the state as it still is
             return;
         }
         log("controls: " + key + " set to " + value + " from Home Assistant");
-        configure(changed);
+        configure(remember(key, value));
     }
 
     private void publishText(String key, String name, String value) {
