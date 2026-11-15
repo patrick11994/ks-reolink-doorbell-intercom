@@ -80,6 +80,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     // The same for video: Automatic got its picture over RTSP after Baichuan brought none (through an NVR, #6), so it
     // opens RTSP straight away, instead of waiting 2 s for Baichuan on every ring.
     private volatile boolean baichuanVideoFailed;
+    // The doorbell has spoken Baichuan since the event session last connected anew: a refused port 9000 later is a
+    // reboot, not a doorbell without it, such as the Video Doorbell WiFi Gen 2 (#14, #17).
+    private volatile boolean baichuanAnswered;
     private MicCapture mic;
     private CallVolume callVolume;
     // The slider's level: updateSettings stores it for later sessions but does not call configure, so settings keeps
@@ -254,6 +257,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     }
 
     private synchronized void connect() {
+        baichuanAnswered = false;  // a new doorbell, or a new way to reach it: learnt again
         BaichuanClient previous = events;
         events = null;
         if (previous != null) previous.stop();
@@ -278,7 +282,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
             @Override public void onConnection(boolean connected, String detail) {
                 if (events != self[0]) return;
-                if (connected) answered = true;
+                if (connected) answered = baichuanAnswered = true;
                 if (!connected && !answered && s.eventsPath.equals("Automatic") && portClosed(detail)) {
                     // Nothing listens on 9000, as on the Video Doorbell WiFi Gen 2: its presses come over ONVIF (#14).
                     log("events: the doorbell refuses Baichuan on port 9000 (" + detail + "), so button presses come over ONVIF");
@@ -714,10 +718,16 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         BaichuanTalk baichuan = new BaichuanTalk(s.host, 9000, s.username, s.password, s.channel, state -> {
             if (!state.equals("connecting") && !state.equals("open")) log("talk: " + state);
             else if (state.equals("open")) log("talk: open over Baichuan");
-            if (state.equals("open")) talkOpened(generation);
-            if (state.startsWith("talk refused") && fallback[0] != null) {
+            if (state.equals("open")) {
+                baichuanAnswered = true;
+                talkOpened(generation);
+            }
+            // Nothing listens on port 9000, as on the Video Doorbell WiFi Gen 2: it talks over ONVIF only (#17). A
+            // doorbell that answered Baichuan before is rebooting: ONVIF for this call, Baichuan again on the next.
+            boolean portClosed = state.startsWith("talk failed") && portClosed(state);
+            if ((state.startsWith("talk refused") || portClosed) && fallback[0] != null) {
                 // 422 even after a reset: someone else is talking, which passes. Anything else is the doorbell's way.
-                boolean lasting = !state.contains("answered 422");
+                boolean lasting = portClosed ? !baichuanAnswered : !state.contains("answered 422");
                 log("talk: falling back to the ONVIF backchannel" + (lasting ? ", from now on" : " for this call"));
                 if (lasting) {
                     baichuanTalkRefused = true;
