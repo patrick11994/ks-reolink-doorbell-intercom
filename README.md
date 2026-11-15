@@ -30,7 +30,8 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
   - During a call, **Microphone** and **Speaker** turn each side on and off, and **End call** hangs up.
 - **Closes by itself** when nobody answers. A ring around **Hang up** shows the time left. A touch starts the time over, and Speaker or Answer stop it.
 - **Open it any time** to look outside. Add the **Open** action to the kiosk menu, a gesture or Home Assistant. Opened by hand, it stays open until you close it.
-- **Quick actions on the call screen.** Up to four cards above the call buttons, styled like Home Assistant's tiles. Each runs an action you pick with the same chooser as Gestures: a Home Assistant service or script, such as opening the door through a relay or toggling the lights, or anything else a gesture can do on the panel, such as opening a dashboard view. A card can also show the live state of a Home Assistant entity, such as a light or a lock. A card for a door or gate can ask to be held, so it never runs by accident.
+- **Quick actions on the call screen.** Cards above the call buttons, styled like Home Assistant's tiles or as round buttons. Each runs an action you pick with the same chooser as Gestures: a Home Assistant service or script, such as opening the door through a relay or toggling the lights, or anything else a gesture can do on the panel, such as opening a dashboard view. A card can also show the live state of a Home Assistant entity, such as a light or a lock. A card for a door or gate can ask to be held, so it never runs by accident.
+- **Your own call buttons.** Put the call buttons in the order you like, add your own, such as *Open door* next to *End call*, or leave Answer and Speaker out for a screen that only shows who is there. Buttons and cards can show only while it rings, or only in a call; they slide into place when that changes.
 - **Pauses the music** if you like: at the ring, or once you listen or talk, and resumes it afterwards.
 - **Check button** on the settings page. It tests the address, the login, video and talking with your settings, and whether this device can play the video, and says what to fix.
 - **English and Dutch** for the call screen and messages.
@@ -45,7 +46,7 @@ The plugin talks to the doorbell directly on your own network. It needs no Home 
 
 The cards need Kiosk Satellite's own Home Assistant connection (Settings > Home Assistant); the rest of the plugin works without it.
 
-**A doorbell connected to a Reolink NVR** works too: enter the NVR's address and a user on the NVR, and set **Channel** to the doorbell's channel as the Reolink app shows it. A Reolink Home Hub has not been tested yet.
+**A doorbell connected to a Reolink NVR or Home Hub** works too: enter the NVR's or Home Hub's address and its login, and set **Channel** to the doorbell's channel as the Reolink app shows it. A Video Doorbell WiFi Gen 2 behind a Home Hub has been reported to work, with **Video over** set to *RTSP*; the Reolink app does not show the channel there, so try 1, 2, 3 and so on.
 
 ## Installation
 
@@ -70,7 +71,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 3. Press **Check**. It should say that button presses, video and talking all work. If not, it tells you what to change.
 4. Optional: under **Actions**, open **Open** and turn on **Show in kiosk menu**. You can then look outside from the menu.
 5. Optional: under **Gestures**, use the **Doorbell pressed** trigger to run something on every ring, such as showing a Home Assistant view.
-6. Optional: under **Cards**, press **Add card** for each button or state you want on the call screen. See [Cards](#cards).
+6. Optional: under **Call buttons** and **Cards**, add the buttons and states you want on the call screen. See [Call buttons](#call-buttons) and [Cards](#cards).
 
 ## Settings
 
@@ -78,7 +79,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 |---|---|---|---|
 | Doorbell | **Doorbell address** | IP address or hostname of the doorbell, or of the NVR it is connected to | |
 | Doorbell | **Username** / **Password** | A Reolink user on the doorbell. The password is stored as a masked secret. | |
-| Doorbell | **Channel** | Only for a doorbell connected to a Reolink NVR: its channel there, as the Reolink app shows it | 1 |
+| Doorbell | **Channel** | Only for a doorbell connected to a Reolink NVR or Home Hub: its channel there, as the Reolink app shows it (or try 1, 2, 3 and so on) | 1 |
 | Doorbell | **Button presses over** | *Automatic* (Baichuan, and ONVIF if the doorbell refuses it), *Baichuan* or *ONVIF*. ONVIF is for doorbells without Reolink's own protocol, such as the Video Doorbell WiFi Gen 2. | Automatic |
 | Doorbell | **Name** | Shown at the top of the call screen. Empty shows *Front door*. | empty |
 | Doorbell | **Check the doorbell** | Tests button presses, video and talking with your settings, and whether this device can play the video | |
@@ -97,8 +98,10 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Video and audio | **Talk mode** | *Hands free* keeps the microphone open during a call. *Push to talk* sends your voice only while you hold the microphone button, and turns the door's sound down meanwhile, so the door cannot hear itself. | Hands free |
 | Video and audio | **Microphone sample rate** | Automatic (16000 Hz, then 48000 Hz, then 8000 Hz), or one fixed rate | Automatic |
 | Video and audio | **Android call mode** | Switches Android to call mode on the loudspeaker during a call, which most devices need for echo cancelling | on |
-| Video and audio | **Language** | Automatic (the panel's Android language), English or Nederlands | Automatic |
-| Cards | **Cards** | Up to four cards on the call screen. See [Cards](#cards). | none |
+| Video and audio | **Language** | Automatic (the panel's Android language), or one of the [translations](#translations) | Automatic |
+| Call screen | **Call buttons** | The round buttons at the bottom of the call screen, in their order. See [Call buttons](#call-buttons). | Answer, Speaker, Hang up |
+| Call screen | **Cards** | Cards on the call screen. See [Cards](#cards). | none |
+| Call screen | **Landscape column** | On a landscape screen, where the buttons and cards sit in the columns beside the picture: *At the bottom*, *Centred* or *At the top* | At the bottom |
 
 **Actions:**
 
@@ -120,6 +123,21 @@ Point a Home Assistant dashboard button's tap action at a dashboard link to run 
 | **Answered** | Someone answers a ring: Answer, or the first hold of Talk |
 | **Missed ring** | A ring closes by itself after **Close the viewer after**, without anyone pressing Speaker or Answer |
 
+### Call buttons
+
+The list starts with the call screen's own three buttons: **Answer / Microphone** (Answer while it rings, the microphone in a call), **Speaker** and **Hang up / End call**. Move them to put them in another order, and press **Add button** for one of your own, with these fields:
+
+| Field | What it does |
+|---|---|
+| **Label** | Shown below the button |
+| **Icon** | Any Material Design icon |
+| **Action** | What a tap does, picked with the same chooser as Gestures |
+| **Button colour** | The button's colour |
+| **Show** | *Always*, *While ringing* or *In a call* (which counts listening with Speaker too) |
+| **Hold to run** | Runs the action only after you hold the button for a moment, for a door or a gate |
+
+Leave out Answer and Speaker for a screen that only shows who is at the door. Without Hang up, a small close button shows in the top corner instead, with the countdown of **Close the viewer after** around it. When there are more buttons than fit, they get smaller first; only then does their row (or, in landscape, their part of the column) scroll.
+
 ### Cards
 
 Each card has these fields. It needs an action, an entity or both.
@@ -131,8 +149,11 @@ Each card has these fields. It needs an action, an entity or both.
 | **State** | A Home Assistant entity whose live state the card shows, such as `light.porch`, `lock.front_door` or `alarm_control_panel.home`. Optional. |
 | **Action** | What a tap does, picked with the same chooser as Gestures: a Home Assistant service, script or automation, a dashboard view, and the rest. Optional: without one, the card only shows the state. |
 | **Hold to run** | Runs the action only after you hold the card for a moment, for a door or a gate |
+| **Style** | *Tile* shows the label and the state. *Button* is round, like the call buttons, with the label below it. |
+| **Colour** | *Follow the state* (below), or *Fixed colour* with a colour you pick |
+| **Show** | *Always*, *While ringing* or *In a call* (which counts listening with Speaker too) |
 
-The card's colour follows the state the way Home Assistant does: a light that is on is amber, a locked lock or an armed alarm green, an unlocked lock or a triggered alarm red, and a state that is changing orange. An entity that Home Assistant does not have, or that is unreachable, shows dimmed as *Unavailable*, never as off. In portrait the cards sit above the call buttons, two to a row. In landscape they go above the call buttons too when the screen is tall enough, which gives the picture more room, and get their own column on the left otherwise. On a small, nearly square screen, such as an NSPanel Pro, the picture fills the screen and the cards become a row of round buttons: an active state fills the button, an inactive one is a ring. During a call there, all controls fade out a second after you answer, as in a video call app; tap the screen to bring them back.
+The card's colour follows the state the way Home Assistant does: a light that is on is amber, a locked lock or an armed alarm green, an unlocked lock or a triggered alarm red, and a state that is changing orange. An entity that Home Assistant does not have, or that is unreachable, shows dimmed as *Unavailable*, never as off. In portrait the cards sit above the call buttons, tiles two to a row and Button-style cards after them; more than fit scroll, so the picture keeps its size. In landscape they go above the call buttons too when the screen is tall enough, which gives the picture more room, and get their own column on the left otherwise. On a small, nearly square screen, such as an NSPanel Pro, the picture fills the screen and the cards become a row of round buttons: an active state fills the button, an inactive one is a ring. During a call there, all controls fade out a second after you answer, as in a video call app; tap the screen to bring them back.
 
 ## Good to know
 
