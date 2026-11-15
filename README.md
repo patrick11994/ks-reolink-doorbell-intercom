@@ -83,6 +83,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Doorbell | **Button presses over** | *Automatic* (Baichuan, and ONVIF if the doorbell refuses it), *Baichuan* or *ONVIF*. ONVIF is for doorbells without Reolink's own protocol, such as the Video Doorbell WiFi Gen 2. | Automatic |
 | Doorbell | **Name** | Shown at the top of the call screen. Empty shows *Front door*. | empty |
 | Doorbell | **Check the doorbell** | Tests button presses, video and talking with your settings, and whether this device can play the video | |
+| Ringing | **Ring on this device** | Off: a press plays no chime, does not wake the screen and does not open the call screen here; Last ring and the *Doorbell pressed* trigger still follow presses. Also a switch in Home Assistant, see [In Home Assistant](#in-home-assistant). | on |
 | Ringing | **Play a chime** | A ding-dong when the button is pressed | on |
 | Ringing | **Chime volume** | How loud the chime itself is, 5 to 100. 40 is a soft chime. | 40 |
 | Ringing | **Chime sound** | Which Android volume the chime follows: *Notifications*, *Media* or *Alarm* | Notifications |
@@ -112,6 +113,21 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | **Close** | Closes the call screen | `ks://plugin/reolink-doorbell/dismiss` |
 
 Point a Home Assistant dashboard button's tap action at a dashboard link to run the action on the panel that shows the dashboard, for example a button that opens the call screen to look outside. Dashboard links need Kiosk Satellite 2026.11.16 or newer.
+
+### In Home Assistant
+
+With Kiosk Satellite's ESPHome connection, each panel shows these next to its other entities in Home Assistant. Each one is the same as the setting: changing it in Home Assistant changes the setting, and the other way round.
+
+| Entity | Type |
+|---|---|
+| **Ring on this device** | Switch. Off: the panel stays dark and silent on a press, for example in a bedroom while someone sleeps |
+| **Play a chime** | Switch |
+| **Wake the screen** | Switch |
+| **Chime volume** | Number, 5 to 100 |
+| **Last ring** | When the doorbell last rang, also while ringing is off |
+| **Doorbell connection** | Whether the panel is connected to the doorbell |
+
+With **Play a chime** and **Wake the screen** off, the call screen still opens, quietly; with **Ring on this device** off, it does not.
 
 **Triggers**, for Gestures:
 
@@ -206,12 +222,12 @@ The call screen, the messages, the readings and the Check button's results can b
 
 | Language | Translated | Out of date | File |
 | --- | --- | --- | --- |
-| Nederlands | 100% (84 of 84) | – | [`nl.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/nl.properties) |
-| Português (Brasil) | 97% (82 of 84) | – | [`pt-BR.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/pt-BR.properties) |
-| Deutsch | 46% (39 of 84) | – | [`de.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/de.properties) |
-| Français | 5% (5 of 84) | – | [`fr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/fr.properties) |
-| Hrvatski | 97% (82 of 84) | – | [`hr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/hr.properties) |
-| Italiano | 98% (83 of 84) | – | [`it.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/it.properties) |
+| Nederlands | 100% (88 of 88) | – | [`nl.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/nl.properties) |
+| Português (Brasil) | 93% (82 of 88) | – | [`pt-BR.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/pt-BR.properties) |
+| Deutsch | 44% (39 of 88) | – | [`de.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/de.properties) |
+| Français | 5% (5 of 88) | – | [`fr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/fr.properties) |
+| Hrvatski | 93% (82 of 88) | – | [`hr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/hr.properties) |
+| Italiano | 94% (83 of 88) | – | [`it.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/it.properties) |
 
 <!-- /translations -->
 

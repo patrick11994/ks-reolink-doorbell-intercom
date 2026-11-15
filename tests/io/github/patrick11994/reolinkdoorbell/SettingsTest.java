@@ -113,6 +113,10 @@ public final class SettingsTest {
         check(new ReolinkPlugin.Settings(before).sameConnection(new ReolinkPlugin.Settings(after)), true);
         after.put("events", "ONVIF");
         check(new ReolinkPlugin.Settings(before).sameConnection(new ReolinkPlugin.Settings(after)), false);
+        // Ring on this device: on unless switched off, so installs from before it keep ringing.
+        check(new ReolinkPlugin.Settings(new HashMap<>()).ring, true);
+        check(new ReolinkPlugin.Settings(Collections.<String, Object>singletonMap("ring", false)).ring, false);
+
         System.out.println("SettingsTest passed (" + seen.size() + " choices)");
     }
 

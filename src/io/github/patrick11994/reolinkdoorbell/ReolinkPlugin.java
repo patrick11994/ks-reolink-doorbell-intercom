@@ -7,7 +7,9 @@ import android.view.View;
 import java.text.SimpleDateFormat;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -110,6 +112,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         this.host = host;
         Texts.setAssets(host::openAsset);  // the language files under assets/i18n
         settings = new Settings(values);
+        this.values = new HashMap<>(values);
         baichuanTalkRefused = false;
         baichuanVideoFailed = false;
         texts = Texts.of(settings.language);
@@ -177,12 +180,14 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             if (c != null) c.tick();
         }, 1, 1, TimeUnit.SECONDS);
         publishText("last_ring", texts.lastRingReading(), texts.noneYet());
+        publishControls();
         connect();
     }
 
     @Override public void configure(Map<String, Object> values) {
         Settings previous = settings;
         settings = new Settings(values);
+        this.values = new HashMap<>(values);
         baichuanTalkRefused = false;
         baichuanVideoFailed = false;
         texts = Texts.of(settings.language);
@@ -192,6 +197,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             c.setAutoCloseMillis(settings.autoCloseMillis);
             c.setMaxCallMillis(settings.maxCallMillis);
         }
+        publishControls();
         if (previous == null || !previous.sameConnection(settings)) connect();
         if (viewerOpen) {
             followCards(settings.cards);
@@ -229,6 +235,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             }
             DoorbellView v = view;
             if (v != null) v.post(() -> v.entityChanged(entityId, payload));
+            return;
+        }
+        if (event.startsWith("switch.") || event.startsWith("number.")) {
+            control(event, payload);
             return;
         }
         if ("overlay.closed".equals(event) && OVERLAY.equals(payload.get("key"))) {
@@ -317,12 +327,32 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                     return;
                 }
                 if (event.visitor()) publishText("last_ring", texts.lastRingReading(), new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date()));
-                c.onVisitor(event.visitor());
+                visitor(c, event.visitor());
             }
         });
         self[0] = client;
         events = client;
         client.start();
+    }
+
+    private boolean visitorBefore;  // the doorbell's visitor state as last reported, for a press with ringing off
+
+    /**
+     * The doorbell's visitor state, from Baichuan or ONVIF. Ring on this device (#19) off: no chime, screen or call
+     * screen on this panel, only Last ring (published by the caller) and the Doorbell pressed trigger, once a press.
+     * The controller then does not see the press at all, so it neither rings nor counts a missed ring.
+     */
+    private synchronized void visitor(RingController c, boolean visitor) {
+        boolean press = visitor && !visitorBefore;
+        visitorBefore = visitor;
+        if (settings.ring || !visitor) {
+            c.onVisitor(visitor);
+            return;
+        }
+        if (press) {
+            log("ring: off on this device (Ring on this device), so only Last ring and Doorbell pressed");
+            fireTrigger("doorbellPressed");
+        }
     }
 
     /** Whether a dropped Baichuan session means nothing listens on its port, rather than a doorbell that is away. */
@@ -360,7 +390,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 RingController c = controller;
                 if (c == null || onvifEvents != self[0]) return;
                 if (visitor) publishText("last_ring", texts.lastRingReading(), new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date()));
-                c.onVisitor(visitor);
+                ReolinkPlugin.this.visitor(c, visitor);
             }
         });
         self[0] = client;
@@ -1060,6 +1090,70 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }
     }
 
+    // The settings as Kiosk Satellite last handed them over: a control from Home Assistant changes one and saves it.
+    private volatile Map<String, Object> values = new HashMap<>();
+    private static final String[] SWITCHES = {"ring", "chime", "wakeScreen"};
+
+    /** Ring on this device, Play a chime, Wake the screen and Chime volume as Home Assistant controls (#19). */
+    private void publishControls() {
+        PluginHost h = host;
+        Settings s = settings;
+        Texts t = texts;
+        if (h == null || s == null) return;
+        try {
+            h.publishSwitch("ring", t.ringControl(), s.ring);
+            h.publishSwitch("chime", t.chimeControl(), s.chime);
+            h.publishSwitch("wakeScreen", t.wakeControl(), s.wakeScreen);
+            h.publishNumber("chimeVolume", t.chimeVolumeControl(), chimeVolumeRange(), (double) s.chimeVolume);
+        } catch (UnsupportedOperationException older) {
+            // A Kiosk Satellite without writable entities: the settings page still has them.
+        } catch (RuntimeException refused) {
+            log("controls: " + refused.getMessage());
+        }
+    }
+
+    /** The Chime volume setting's own range, so Home Assistant offers the same steps. */
+    private static Map<String, Object> chimeVolumeRange() {
+        Map<String, Object> range = new LinkedHashMap<>();
+        range.put("min", 5);
+        range.put("max", 100);
+        range.put("step", 5);
+        range.put("unit", "%");
+        range.put("mode", "slider");
+        return range;
+    }
+
+    /**
+     * Home Assistant changed a control: saved as the plugin setting it stands for, then applied the way a change on
+     * the settings page is, which publishes the applied state back. A setting is the one value, so the two never differ.
+     */
+    private synchronized void control(String event, Map<String, Object> payload) {
+        PluginHost h = host;
+        if (h == null) return;
+        String key = event.substring(event.indexOf('.') + 1);
+        Object value;
+        if (event.startsWith("switch.") && java.util.Arrays.asList(SWITCHES).contains(key) && payload.get("on") instanceof Boolean) {
+            value = payload.get("on");
+        } else if (event.equals("number.chimeVolume") && payload.get("value") instanceof Number) {
+            // Home Assistant does not snap to the step: to the setting's own 5s, within its range.
+            long volume = Math.round(((Number) payload.get("value")).doubleValue() / 5) * 5;
+            value = (int) Math.max(5, Math.min(100, volume));
+        } else {
+            return;
+        }
+        Map<String, Object> changed = new HashMap<>(values);
+        changed.put(key, value);
+        try {
+            h.updateSettings(Collections.singletonMap(key, value));
+        } catch (RuntimeException failed) {
+            log("controls: " + key + " not saved: " + failed.getMessage());
+            publishControls();  // the state as it still is
+            return;
+        }
+        log("controls: " + key + " set to " + value + " from Home Assistant");
+        configure(changed);
+    }
+
     private void publishText(String key, String name, String value) {
         PluginHost h = host;
         if (h == null) return;
@@ -1084,7 +1178,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     static final class Settings {
         final String host, username, password, streamPath, language, microphone, micRate, musicPause, chimeStream, talkPath, videoPath, eventsPath;
         private final String name;
-        final boolean chime, wakeScreen, wakeWordRestore, musicRestore, callMode, pushToTalk;
+        final boolean ring, chime, wakeScreen, wakeWordRestore, musicRestore, callMode, pushToTalk;
         final long autoCloseMillis, maxCallMillis;
         final int callVolume, chimeVolume;
         final int channel;  // behind an NVR, the doorbell's channel there, counted from 0; 0 for a doorbell reached directly
@@ -1118,6 +1212,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             String pause = string(values, "musicPause");
             musicPause = pause.equals("At the ring") || pause.equals("At Speaker or Answer") ? pause : "Off";
             wakeScreen = !Boolean.FALSE.equals(values.get("wakeScreen"));
+            ring = !Boolean.FALSE.equals(values.get("ring"));
             autoCloseMillis = autoClose(string(values, "autoClose"));
             maxCallMillis = maxCall(string(values, "maxCall"));
             wakeWordRestore = Boolean.TRUE.equals(values.get("wakeWordRestore"));

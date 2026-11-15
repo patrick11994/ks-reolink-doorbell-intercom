@@ -146,6 +146,10 @@ final class Texts {
     String holdToTalkHint() { return get("holdToTalkHint"); }
     String connecting() { return get("connecting"); }
     String close() { return get("close"); }
+    String ringControl() { return get("ringControl"); }
+    String chimeControl() { return get("chimeControl"); }
+    String wakeControl() { return get("wakeControl"); }
+    String chimeVolumeControl() { return get("chimeVolumeControl"); }
     String noPictureYet() { return get("noPictureYet"); }
     String noVideo() { return get("noVideo"); }
     String videoStopped() { return get("videoStopped"); }
