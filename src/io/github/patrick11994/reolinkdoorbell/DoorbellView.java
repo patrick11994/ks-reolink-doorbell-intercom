@@ -773,7 +773,17 @@ final class DoorbellView extends FrameLayout {
         boolean changed = state != this.state;
         boolean answered = changed && this.state == State.RINGING;
         this.state = state;
-        if (state == State.IDLE) talking = false;  // the plugin stops push to talk with the call
+        if (state == State.IDLE && talking) {
+            // The plugin stops push to talk with the call: what waited for the release is done or dropped now.
+            talking = false;
+            if (arrangePending) {
+                arrangePending = false;
+                arrange(pendingWide);
+                applyPadding();
+            }
+            stateChangePending = false;
+            renderPending = false;
+        }
         this.speakerOn = speakerOn;
         this.micOn = micOn;
         if (changed && arranged && followsState()) {
@@ -1405,17 +1415,22 @@ final class DoorbellView extends FrameLayout {
         List<Cards.Card> shown = visibleCards();
         cardBox.setVisibility(shown.isEmpty() ? GONE : controlsHidden ? INVISIBLE : VISIBLE);
         if (overlay) {
-            // One row of round buttons, as on Apple Home's camera view: the icon's colour carries the state. More than
-            // the width takes scroll sideways; a row that fits stays centred.
-            android.widget.HorizontalScrollView scroll = new android.widget.HorizontalScrollView(getContext());
-            scroll.setHorizontalScrollBarEnabled(false);
-            scroll.setHorizontalFadingEdgeEnabled(true);
-            scroll.setFillViewport(true);
+            // One row of round buttons, as on Apple Home's camera view: the icon's colour carries the state. Only more
+            // than the width takes scroll sideways: a sideways scroll takes any sideways drift, even a hold's.
             LinearLayout row = new LinearLayout(getContext());
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_HORIZONTAL);
-            scroll.addView(row, new FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
-            cardBox.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            int needed = theme.px(shown.size() * (ROUND_CARD_DP + 16) - 16 + 48);  // the cards, their gaps, the box's padding
+            if (getWidth() > 0 && needed > getWidth()) {
+                android.widget.HorizontalScrollView scroll = new android.widget.HorizontalScrollView(getContext());
+                scroll.setHorizontalScrollBarEnabled(false);
+                scroll.setHorizontalFadingEdgeEnabled(true);
+                scroll.setFillViewport(true);
+                scroll.addView(row, new FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
+                cardBox.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            } else {
+                cardBox.addView(row, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            }
             for (int i = 0; i < shown.size(); i++) {
                 CardHolder holder = new CardHolder(getContext(), shown.get(i), true, 0, false);
                 holder.root.setTransitionName("card:" + shown.get(i).list + ":" + shown.get(i).row);
@@ -1725,11 +1740,11 @@ final class DoorbellView extends FrameLayout {
                     cancelHold();
                     return true;
                 case MotionEvent.ACTION_MOVE:
-                    // Moved further than a tap: a swipe through the cards, never a hold. The list gets it back.
+                    // Moved further than a tap: the list may have it back. One that can scroll that way takes it and
+                    // cancels the hold, so a swipe through the cards never runs one; elsewhere the hold goes on.
                     float slop = android.view.ViewConfiguration.get(getContext()).getScaledTouchSlop();
-                    if (animator != null && Math.hypot(event.getX() - downX, event.getY() - downY) > slop) {
-                        cancelHold();
-                        if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(false);
+                    if (animator != null && Math.hypot(event.getX() - downX, event.getY() - downY) > slop && getParent() != null) {
+                        getParent().requestDisallowInterceptTouchEvent(false);
                     }
                     return true;
                 default:
