@@ -108,6 +108,7 @@ final class DoorbellView extends FrameLayout {
     // Landscape, last resort: the column has no room left even at the smallest size, so the buttons' part takes what
     // is left of its height and scrolls (a LinearLayout gives a later child no less room for a spacer above it).
     private boolean columnScrolls;
+    private boolean arrangedWithCards;  // landscape: arrange placed cards, in their column or above the buttons
     static final int COLUMN_BOTTOM = 0, COLUMN_CENTRE = 1, COLUMN_TOP = 2;
     private int columnPosition = COLUMN_BOTTOM;  // landscape: where the buttons and cards sit in their columns
     private final View spacerEnd;  // landscape: the room below the controls, for a centred or top column
@@ -268,6 +269,11 @@ final class DoorbellView extends FrameLayout {
         applyTheme(theme);
     }
 
+    @Override protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+        animationPending = false;  // its pre-draw callback went with the window
+    }
+
     /** Portrait or landscape follows the view's own shape, so a rotation or a KS rebuild rearranges it. */
     @Override protected void onSizeChanged(int width, int height, int oldWidth, int oldHeight) {
         super.onSizeChanged(width, height, oldWidth, oldHeight);
@@ -402,6 +408,7 @@ final class DoorbellView extends FrameLayout {
             buttons.setOrientation(LinearLayout.VERTICAL);
             addView(side, new LayoutParams(columnPx, LayoutParams.MATCH_PARENT, Gravity.END));
             cardBox.setGravity(Gravity.TOP);
+            arrangedWithCards = !visibleCards().isEmpty();
             if (!visibleCards().isEmpty() && !cardsRight) {
                 videoParams.leftMargin = columnPx;
                 // Their own column starts at the top as it always did, unless the setting centres the controls.
@@ -432,8 +439,7 @@ final class DoorbellView extends FrameLayout {
             cardBox.setGravity(Gravity.TOP);
             bottomBox.addView(cardBox, new LinearLayout.LayoutParams(fill, wrap));
             bottomBox.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
-            buttonRow.addView(buttons, new FrameLayout.LayoutParams(wrap, wrap));
-            bottomBox.addView(buttonRow, new LinearLayout.LayoutParams(fill, wrap));
+            bottomBox.addView(buttons, new LinearLayout.LayoutParams(fill, wrap));  // placeButtonRow scrolls it if needed
             buttons.setOrientation(LinearLayout.HORIZONTAL);
             bottomBox.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, new int[] {0xCC000000, 0x99000000, 0x00000000}));
             addView(bottomBox, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
@@ -452,8 +458,7 @@ final class DoorbellView extends FrameLayout {
             cardScroll.addView(cardBox, new ScrollView.LayoutParams(fill, wrap));
             bottomBox.addView(cardScroll, new LinearLayout.LayoutParams(fill, wrap));
             bottomBox.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
-            buttonRow.addView(buttons, new FrameLayout.LayoutParams(wrap, wrap));
-            bottomBox.addView(buttonRow, new LinearLayout.LayoutParams(fill, wrap));
+            bottomBox.addView(buttons, new LinearLayout.LayoutParams(fill, wrap));  // placeButtonRow scrolls it if needed
             buttons.setOrientation(LinearLayout.HORIZONTAL);
             addView(bottomBox, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
         }
@@ -495,10 +500,11 @@ final class DoorbellView extends FrameLayout {
         }
         if (!overlay && cardScroll.getParent() != null && getWidth() > 0) {
             // The cards take what the name, the picture at the full width and the buttons leave; beyond that they
-            // scroll. At least one row shows, even if the picture has to give up some height for it.
+            // scroll.
             float aspect = videoWidth > 0 && videoHeight > 0 ? videoWidth / (float) videoHeight : 4f / 3f;
             int rest = bottomBox.getHeight() - cardScroll.getHeight();
-            int cap = Math.max(theme.px(CARD_DP + 24), getHeight() - topBox.getHeight() - Math.round(getWidth() / aspect) - rest);
+            // Two rows always show, as four tiles always did, even if the picture gives up some height for them.
+            int cap = Math.max(theme.px(2 * (CARD_DP + 12) + 24), getHeight() - topBox.getHeight() - Math.round(getWidth() / aspect) - rest);
             if (cap != cardScroll.cap) {
                 cardScroll.cap = cap;
                 cardScroll.requestLayout();
@@ -844,6 +850,7 @@ final class DoorbellView extends FrameLayout {
             }
         } else {
             boolean scrolls = !landscape && rowOverflows();
+            if (!landscape) placeButtonRow(scrolls);
             // A row that scrolls is spaced so the next button shows half at the edge: there is more.
             int cell = theme.px(buttonDp + 16 + 8);
             if (scrolls) {
@@ -862,6 +869,27 @@ final class DoorbellView extends FrameLayout {
         if (controlsHidden && !views.isEmpty()) buttons.setVisibility(INVISIBLE);
         if (landscape) post(this::fitColumn);
         if (landscape && columnLevel >= 1) evenLabelsWhenLaidOut();
+    }
+
+    /**
+     * A row that fits sits in its box as it always did, so its labels wrap as before; only one wider than the screen
+     * goes into the sideways scroll (which measures its labels on one line). Moved in place, at the same index.
+     */
+    private void placeButtonRow(boolean scrolls) {
+        View holder = scrolls ? buttonRow : buttons;
+        if (holder.getParent() == bottomBox && (!scrolls || buttons.getParent() == buttonRow)) return;
+        View current = buttons.getParent() == buttonRow ? buttonRow : buttons;
+        int index = bottomBox.indexOfChild(current);
+        if (index < 0) index = bottomBox.getChildCount();
+        detach(buttons);
+        detach(buttonRow);
+        int wrap = LinearLayout.LayoutParams.WRAP_CONTENT, fill = LinearLayout.LayoutParams.MATCH_PARENT;
+        if (scrolls) {
+            buttonRow.addView(buttons, new FrameLayout.LayoutParams(wrap, wrap));
+            bottomBox.addView(buttonRow, index, new LinearLayout.LayoutParams(fill, wrap));
+        } else {
+            bottomBox.addView(buttons, index, new LinearLayout.LayoutParams(fill, wrap));
+        }
     }
 
     /** One call button: the viewer's own for its role, or the user's own action as a round button of the same size. */
@@ -960,7 +988,8 @@ final class DoorbellView extends FrameLayout {
             applyPadding();
         } else if (columnLevel < 2) {
             columnLevel++;
-            buttonDp = Math.min(buttonDp, LOW_BUTTON_DP);
+            // The low layout's size, as it always was; the next level never makes them bigger again.
+            buttonDp = columnLevel == 1 ? LOW_BUTTON_DP : Math.min(buttonDp, LOW_BUTTON_DP);
         } else if (buttonDp > 48) {
             buttonDp = 48;
         } else if (!columnScrolls) {
@@ -1056,12 +1085,15 @@ final class DoorbellView extends FrameLayout {
         if (!now && stateChangePending) {
             stateChangePending = false;
             renderPending = false;
+            boolean rearranged = arrangePending;
             if (arrangePending) {
                 arrangePending = false;
                 arrange(pendingWide);
                 applyPadding();
             }
+            if (rearranged) animationPending = true;  // nothing laid out yet to slide from: just rebuild
             stateChange();
+            if (rearranged) animationPending = false;
         } else if (!now && arrangePending) {
             arrangePending = false;
             renderPending = false;
@@ -1251,16 +1283,13 @@ final class DoorbellView extends FrameLayout {
      */
     private void stateChange() {
         if (talking) {
-            stateChangePending = true;  // all of it waits for Hold to talk to be let go
+            stateChangePending = true;  // the cards and buttons wait for Hold to talk to be let go
+            render();  // the rest, such as the volume slider, shows now; render keeps the buttons as they are
             return;
         }
-        if (landscape) {
-            boolean right = cardsFitRight(getHeight());
-            boolean leftColumn = !visibleCards().isEmpty() && !right;
-            if (right != cardsRight || leftColumn != (cardSide.getParent() != null)) {
-                relayout();
-                return;
-            }
+        if (landscape && visibleCards().isEmpty() != !arrangedWithCards) {
+            relayout();  // cards appear where there were none, or the last ones go: the columns change
+            return;
         }
         // A second change before the first was drawn: its views have no places yet, so this one just rebuilds.
         boolean animate = !animationPending;
@@ -1642,6 +1671,7 @@ final class DoorbellView extends FrameLayout {
     private final class HoldFrame extends LinearLayout {
         Runnable hold, tooShort;
         boolean round;
+        private float downX, downY;
         private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF bounds = new RectF();
         private ValueAnimator animator;
@@ -1662,7 +1692,10 @@ final class DoorbellView extends FrameLayout {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     cancelHold();
-                    if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);  // a scrolling row must not cancel the hold
+                    // A finger that only trembles keeps the hold; one that moves further is scrolling (below).
+                    if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
+                    downX = event.getX();
+                    downY = event.getY();
                     animator = ValueAnimator.ofFloat(0f, 1f);
                     animator.setDuration(HOLD_MILLIS);
                     animator.addUpdateListener(a -> {
@@ -1690,6 +1723,14 @@ final class DoorbellView extends FrameLayout {
                     return true;
                 case MotionEvent.ACTION_CANCEL:
                     cancelHold();
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    // Moved further than a tap: a swipe through the cards, never a hold. The list gets it back.
+                    float slop = android.view.ViewConfiguration.get(getContext()).getScaledTouchSlop();
+                    if (animator != null && Math.hypot(event.getX() - downX, event.getY() - downY) > slop) {
+                        cancelHold();
+                        if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(false);
+                    }
                     return true;
                 default:
                     return true;
