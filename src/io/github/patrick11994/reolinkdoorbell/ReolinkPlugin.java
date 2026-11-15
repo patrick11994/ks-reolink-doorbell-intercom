@@ -196,8 +196,12 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         if (viewerOpen) {
             followCards(settings.cards);
             DoorbellView v = view;
-            List<Cards.Card> cards = settings.cards;
-            if (v != null) v.post(() -> v.setCards(cards));
+            Settings now = settings;
+            if (v != null) v.post(() -> {
+                v.setColumnPosition(now.columnPosition);
+                v.setCallButtons(now.callButtons);
+                v.setCards(now.cards);
+            });
         }
     }
 
@@ -405,6 +409,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
                 });
                 view = created;  // first, so a state arriving during the replay below reaches this view, not the old one
                 for (Map.Entry<String, Map<?, ?>> known : snapshots.entrySet()) created.entityChanged(known.getKey(), known.getValue());
+                created.setColumnPosition(settings.columnPosition);
+                created.setCallButtons(settings.callButtons);
                 created.setCards(settings.cards);
                 created.setPushToTalk(callPushToTalk);
                 if (c != null) created.update(c.state(), c.speakerOn(), c.micOn());
@@ -1084,6 +1090,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         final int channel;  // behind an NVR, the doorbell's channel there, counted from 0; 0 for a doorbell reached directly
         final boolean channelValid;  // the Channel field held a number from 1 to 99; otherwise channel is 0 and Check says so
         final List<Cards.Card> cards;
+        final List<Cards.Card> callButtons;
+        final int columnPosition;  // DoorbellView.COLUMN_BOTTOM, COLUMN_CENTRE or COLUMN_TOP
 
         Settings(Map<String, Object> values) {
             host = string(values, "host");
@@ -1125,6 +1133,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             Object volume = values.get("callVolume");
             callVolume = volume instanceof Number ? Math.max(0, Math.min(100, ((Number) volume).intValue())) : 70;
             cards = Cards.parse(values.get("cards"));
+            callButtons = Cards.parseCallButtons(values.get("callButtons"));
+            String column = string(values, "landscapeColumn");
+            columnPosition = column.startsWith("Centred") ? DoorbellView.COLUMN_CENTRE : column.startsWith("At the top") ? DoorbellView.COLUMN_TOP
+                : DoorbellView.COLUMN_BOTTOM;
         }
 
         /** The doorbell's name for the viewer, or the translated default. */

@@ -21,12 +21,51 @@ public final class CardsTest {
         rows.add(row("Fifth", "", "sensor.a", action(), false));
         rows.add(row("Sixth", "", "sensor.b", action(), false));
         List<Cards.Card> cards = Cards.parse(rows);
-        check(cards.size(), Cards.MAX);
+        check(cards.size(), 5);  // no limit of the plugin's own: only the empty row is left out
         check(cards.get(0).actionPath(), "cards.0.action");
         check(cards.get(1).action, false);
         check(cards.get(2).actionPath(), "cards.3.action");
         check(cards.get(2).confirm, true);
         check(cards.get(3).label, "Fifth");
+        check(cards.get(4).label, "Sixth");
+        check(cards.get(0).button + " " + cards.get(0).color + " " + cards.get(0).show, "false 0 ALWAYS");
+
+        // Style, a fixed colour and when to show, as the card editor saves them.
+        Map<String, Object> styled = new HashMap<>(row("Gate", "mdi:gate", "", action(), true));
+        styled.put("style", "Button");
+        styled.put("colorMode", "Fixed colour");
+        styled.put("color", "#2E7D32");
+        styled.put("show", "In a call");
+        Cards.Card styledCard = Cards.parse(Collections.singletonList(styled)).get(0);
+        check(styledCard.button, true);
+        check(Integer.toHexString(styledCard.color), "ff2e7d32");
+        check(styledCard.shownWhen(RingController.State.RINGING), false);
+        check(styledCard.shownWhen(RingController.State.LISTENING), true);
+        check(styledCard.shownWhen(RingController.State.IN_CALL), true);
+        styled.put("colorMode", "Follow the state");  // the colour stays saved, but is not used
+        check(Cards.parse(Collections.singletonList(styled)).get(0).color, 0);
+        styled.put("show", "While ringing");
+        check(Cards.parse(Collections.singletonList(styled)).get(0).shownWhen(RingController.State.IN_CALL), false);
+
+        // Call buttons: the viewer's own in the user's order, each once, and the user's own with an action.
+        List<Object> calls = new ArrayList<>();
+        calls.add(Collections.singletonMap("button", "Hang up / End call"));
+        Map<String, Object> openDoor = new HashMap<>(row("Open door", "mdi:door-open", "", action(), true));
+        openDoor.put("button", "Action");
+        calls.add(openDoor);
+        Map<String, Object> idle = new HashMap<>(row("Nothing", "", "", Collections.emptyMap(), false));
+        idle.put("button", "Action");
+        calls.add(idle);
+        calls.add(Collections.singletonMap("button", "Answer / Microphone"));
+        calls.add(Collections.singletonMap("button", "Answer / Microphone"));  // a second one is left out
+        List<Cards.Card> buttons = Cards.parseCallButtons(calls);
+        StringBuilder order = new StringBuilder();
+        for (Cards.Card b : buttons) order.append(b.role).append(b.role == Cards.Role.CARD ? ":" + b.label : "").append(' ');
+        check(order.toString().trim(), "HANG_UP CARD:Open door ANSWER");
+        check(buttons.get(1).actionPath(), "callButtons.1.action");
+        check(buttons.get(1).confirm, true);
+        check(Cards.parseCallButtons(null), Cards.DEFAULT_CALL_BUTTONS);
+        check(Cards.parseCallButtons(Collections.emptyList()).size(), 0);  // all removed: the viewer shows a close button
         check(Cards.parse(null).size(), 0);
         check(Cards.parse("junk").size(), 0);
 

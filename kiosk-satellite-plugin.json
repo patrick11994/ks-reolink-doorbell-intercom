@@ -37,15 +37,33 @@
     {"key": "language", "type": "select", "title": "Language", "default": "Automatic", "options": ["Automatic", "English", "Nederlands", "Português (Brasil)", "Deutsch", "Français", "Hrvatski", "Italiano"], "group": "Video and audio", "description": "For the viewer, readings and messages. Automatic follows the panel's Android language."},
     {"key": "autoClose", "type": "select", "title": "Close the viewer after", "default": "1 minute", "options": ["30 seconds", "1 minute", "2 minutes", "5 minutes", "Off"], "group": "Ringing", "description": "After a doorbell press, while nobody touches it; a ring around Hang up shows the time left. A touch starts it over, Speaker or Answer stop it. Opened by hand, it stays open."},
     {"key": "maxCall", "type": "select", "title": "End a call after", "default": "10 minutes", "options": ["5 minutes", "10 minutes", "30 minutes", "Off"], "group": "Ringing", "description": "Once answered or opened by hand, so a forgotten call does not keep the room on the line."},
-    {"key": "cards", "type": "list", "title": "Cards", "group": "Cards", "addTitle": "Add card", "maxItems": 4, "default": [], "description": "Up to four cards in the viewer, above the call buttons: each runs an action you choose, such as a Home Assistant service to open the door or toggle a light, and can show the live state of a Home Assistant entity.",
+    {"key": "callButtons", "type": "list", "title": "Call buttons", "group": "Call screen", "addTitle": "Add button",
+      "default": [{"button": "Answer / Microphone"}, {"button": "Speaker"}, {"button": "Hang up / End call"}],
+      "description": "The round buttons at the bottom of the call screen, in this order. Answer turns into the microphone in a call, Hang up into End call. Add a button of your own, such as one to open the door. Remove Answer and Speaker for a screen that only shows who is there. Without Hang up, a close button shows in the corner.",
+      "row": {"title": "button", "subtitle": ["label", "action"], "icon": "icon"},
+      "fields": [
+        {"key": "button", "type": "select", "title": "Button", "default": "Action", "options": ["Answer / Microphone", "Speaker", "Hang up / End call", "Action"]},
+        {"key": "label", "type": "string", "title": "Label", "description": "Shown below the button.", "visibleWhen": {"key": "button", "equals": "Action"}},
+        {"key": "icon", "type": "icon", "title": "Icon", "visibleWhen": {"key": "button", "equals": "Action"}},
+        {"key": "action", "type": "action", "title": "Action", "default": {}, "description": "What a tap does.", "visibleWhen": {"key": "button", "equals": "Action"}},
+        {"key": "color", "type": "color", "title": "Button colour", "default": "#5F6368", "visibleWhen": {"key": "button", "equals": "Action"}},
+        {"key": "show", "type": "select", "title": "Show", "default": "Always", "options": ["Always", "While ringing", "In a call"], "description": "In a call also counts listening with Speaker.", "visibleWhen": {"key": "button", "equals": "Action"}},
+        {"key": "confirm", "type": "boolean", "title": "Hold to run", "default": false, "description": "Runs the action only after holding the button for a moment, so it cannot be tapped by accident. For a door or a gate.", "visibleWhen": {"key": "button", "equals": "Action"}}
+      ]},
+    {"key": "cards", "type": "list", "title": "Cards", "group": "Call screen", "addTitle": "Add card", "default": [], "description": "Cards in the viewer, above the call buttons: each runs an action you choose, such as a Home Assistant service to open the door or toggle a light, and can show the live state of a Home Assistant entity. More than fit scroll.",
       "row": {"title": "label", "subtitle": ["entity", "action"], "icon": "icon"},
       "fields": [
         {"key": "label", "type": "string", "title": "Label", "description": "Empty uses the entity's name."},
         {"key": "icon", "type": "icon", "title": "Icon", "description": "Empty follows the entity, the way Home Assistant shows it."},
         {"key": "entity", "type": "entity", "title": "State", "description": "A Home Assistant entity whose state the card shows, such as a light, a lock or an alarm. Optional."},
         {"key": "action", "type": "action", "title": "Action", "default": {}, "description": "What a tap does. Optional: without one the card only shows the state."},
-        {"key": "confirm", "type": "boolean", "title": "Hold to run", "default": false, "description": "Runs the action only after holding the card for a moment, so it cannot be tapped by accident. For a door or a gate."}
-      ]}
+        {"key": "confirm", "type": "boolean", "title": "Hold to run", "default": false, "description": "Runs the action only after holding the card for a moment, so it cannot be tapped by accident. For a door or a gate."},
+        {"key": "style", "type": "select", "title": "Style", "default": "Tile", "options": ["Tile", "Button"], "description": "Tile shows the label and the state. Button is round, like the call buttons, with the label below it."},
+        {"key": "colorMode", "type": "select", "title": "Colour", "default": "Follow the state", "options": ["Follow the state", "Fixed colour"], "description": "Follow the state colours the card the way Home Assistant does, such as amber for a light that is on."},
+        {"key": "color", "type": "color", "title": "Card colour", "default": "#2E7D32", "visibleWhen": {"key": "colorMode", "equals": "Fixed colour"}},
+        {"key": "show", "type": "select", "title": "Show", "default": "Always", "options": ["Always", "While ringing", "In a call"], "description": "In a call also counts listening with Speaker."}
+      ]},
+    {"key": "landscapeColumn", "type": "select", "title": "Landscape column", "group": "Call screen", "default": "At the bottom", "options": ["At the bottom", "Centred", "At the top"], "description": "On a landscape screen, where the buttons and cards sit in the columns beside the picture."}
   ],
   "buttons": [
     {"id": "check", "title": "Check the doorbell", "label": "Check", "group": "Doorbell", "description": "Tests if everything should work correctly.", "visibleWhen": {"key": "host", "notEmpty": true}}

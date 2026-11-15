@@ -98,6 +98,18 @@ final class DoorbellView extends FrameLayout {
     private final ScrollView cardSide;  // landscape: the cards' column
     private List<Cards.Card> cards = Collections.emptyList();
     private final List<CardHolder> cardHolders = new ArrayList<>();
+    // The call buttons in the user's order: the viewer's own and the user's own actions (Cards.parseCallButtons).
+    private List<Cards.Card> callButtons = Cards.DEFAULT_CALL_BUTTONS;
+    private final List<CardHolder> callHolders = new ArrayList<>();
+    // The call buttons scroll as a last resort, on their own, never moving among the cards: sideways in a row, up and
+    // down in the landscape column. Until then they shrink, so all of them show as long as they can.
+    private final android.widget.HorizontalScrollView buttonRow;
+    private final ScrollView buttonColumn;
+    static final int COLUMN_BOTTOM = 0, COLUMN_CENTRE = 1, COLUMN_TOP = 2;
+    private int columnPosition = COLUMN_BOTTOM;  // landscape: where the buttons and cards sit in their columns
+    private final View spacerEnd;  // landscape: the room below the controls, for a centred or top column
+    private View close;  // the way out when Hang up is not among the call buttons
+    private final CappedScroll cardScroll;  // portrait: the cards scroll once more would make the picture smaller
     private final Map<String, Map<?, ?>> snapshots = new HashMap<>();
     private boolean landscape;
     private boolean arranged;
@@ -213,6 +225,13 @@ final class DoorbellView extends FrameLayout {
         volumeRow.addView(volume, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         buttons = new LinearLayout(context);
         buttons.setGravity(Gravity.CENTER);
+        buttonRow = new android.widget.HorizontalScrollView(context);
+        buttonRow.setHorizontalScrollBarEnabled(false);
+        buttonRow.setHorizontalFadingEdgeEnabled(true);
+        buttonRow.setFillViewport(true);  // while they fit, the buttons share the width as before
+        buttonColumn = new ScrollView(context);
+        buttonColumn.setVerticalScrollBarEnabled(false);
+        buttonColumn.setVerticalFadingEdgeEnabled(true);
         topBox = new LinearLayout(context);
         topBox.setOrientation(LinearLayout.VERTICAL);
         topBox.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -222,6 +241,7 @@ final class DoorbellView extends FrameLayout {
         side.setOrientation(LinearLayout.VERTICAL);
         side.setGravity(Gravity.CENTER_HORIZONTAL);
         spacer = new View(context);
+        spacerEnd = new View(context);
         cardBox = new LinearLayout(context);
         cardBox.setOrientation(LinearLayout.VERTICAL);
         topRow = new FrameLayout(context);
@@ -230,6 +250,9 @@ final class DoorbellView extends FrameLayout {
         hint.setVisibility(GONE);
         cardSide = new ScrollView(context);
         cardSide.setVerticalScrollBarEnabled(false);
+        cardSide.setFillViewport(true);  // so a centred column can centre in it
+        cardScroll = new CappedScroll(context);
+        cardScroll.setVerticalScrollBarEnabled(false);
         // The picture fills what the name and the controls leave, so the cards never cover it.
         OnLayoutChangeListener boxes = (v, l, t, r, b, ol, ot, or, ob) -> {
             if (b - t != ob - ot) post(this::placeVideo);
@@ -247,7 +270,7 @@ final class DoorbellView extends FrameLayout {
         boolean wide = width > height;
         boolean right = wide && cardsFitRight(height);
         boolean square = !wide && height < width * OVERLAY_ASPECT;
-        int size = square ? OVERLAY_BUTTON_DP : buttonDpFor(wide, height, right);
+        int size = square ? rowButtonDp(width, OVERLAY_BUTTON_DP) : wide ? buttonDpFor(true, height, right) : rowButtonDp(width, 76);
         if (wide != landscape || size != buttonDp || right != cardsRight || square != overlay || !arranged || height != oldHeight) {
             buttonDp = size;
             cardsRight = right;
@@ -261,11 +284,26 @@ final class DoorbellView extends FrameLayout {
         }
     }
 
-    /** Buttons shrink a little on a low landscape screen, so all three always fit in the column. */
+    /** Buttons shrink a little on a low landscape screen, so all of them fit in the column. */
     private int buttonDpFor(boolean wide, int heightPx, boolean withCards) {
-        if (!wide) return 76;
+        if (!wide) return rowButtonDp(getWidth(), 76);
         float available = columnSpareDp(heightPx) - (withCards ? cardsDp() : 0);
-        return Math.max(48, Math.min(76, Math.round(available / 3 - 36)));  // each button: circle + 16 ring + 20 label
+        int count = Math.max(1, visibleCallButtons().size());
+        return Math.max(48, Math.min(76, Math.round(available / count - 36)));  // each button: circle + 16 ring + 20 label
+    }
+
+    /** A row's button size: the usual one while all of them fit the width, smaller down to 48 dp; then the row scrolls. */
+    private int rowButtonDp(int widthPx, int usual) {
+        if (widthPx <= 0) return usual;
+        float widthDp = widthPx / (theme.px(1000) / 1000f) - 48;  // the row's side padding
+        int count = Math.max(1, visibleCallButtons().size());
+        return Math.max(48, Math.min(usual, Math.round(widthDp / count - 16 - 8)));  // each: ring room 16 and a little air
+    }
+
+    /** Whether the row's buttons, at their size, are wider together than the row: then each keeps its own width. */
+    private boolean rowOverflows() {
+        float widthDp = getWidth() / (theme.px(1000) / 1000f) - 48;
+        return visibleCallButtons().size() * (buttonDp + 16 + 8) > widthDp;
     }
 
     /** The landscape column's height left for the buttons and cards: less the name, the padding, the volume slider. */
@@ -275,8 +313,42 @@ final class DoorbellView extends FrameLayout {
         return heightPx / (theme.px(1000) / 1000f) - 54 - 48 - 64;
     }
 
+    /** The landscape cards' height: a row for each tile, and the round Button-style ones two to a row. */
     private float cardsDp() {
-        return cards.size() * (CARD_DP + CARD_GAP_DP) + 4;
+        int round = 0, all = 0;
+        for (Cards.Card card : visibleCards()) {
+            all++;
+            if (card.button) round++;
+        }
+        return (all - round) * (CARD_DP + CARD_GAP_DP) + (round + 1) / 2 * (LOW_BUTTON_DP + 16 + 22 + CARD_GAP_DP) + 4;
+    }
+
+    /** The cards this state of the call shows. */
+    private List<Cards.Card> visibleCards() {
+        List<Cards.Card> shown = new ArrayList<>();
+        for (Cards.Card card : cards) if (card.shownWhen(state)) shown.add(card);
+        return shown;
+    }
+
+    /** The call buttons this state shows, in the user's order. */
+    private List<Cards.Card> visibleCallButtons() {
+        List<Cards.Card> shown = new ArrayList<>();
+        for (Cards.Card button : callButtons) {
+            if (button.shownWhen(state)) shown.add(button);
+        }
+        return shown;
+    }
+
+    private boolean hasHangUp() {
+        for (Cards.Card button : callButtons) if (button.role == Cards.Role.HANG_UP) return true;
+        return false;
+    }
+
+    /** Whether the cards or buttons change with the state of the call (Show "While ringing" or "In a call"). */
+    private boolean followsState() {
+        for (Cards.Card card : cards) if (card.show != Cards.Show.ALWAYS) return true;
+        for (Cards.Card button : callButtons) if (button.show != Cards.Show.ALWAYS) return true;
+        return false;
     }
 
     /**
@@ -284,7 +356,8 @@ final class DoorbellView extends FrameLayout {
      * gives the picture the left column's width. On a lower screen they keep their own column on the left.
      */
     private boolean cardsFitRight(int heightPx) {
-        return !cards.isEmpty() && columnSpareDp(heightPx) - cardsDp() >= 3 * (MIN_BUTTON_WITH_CARDS_DP + 36);
+        int buttonCount = Math.max(1, visibleCallButtons().size());
+        return !visibleCards().isEmpty() && columnSpareDp(heightPx) - cardsDp() >= buttonCount * (MIN_BUTTON_WITH_CARDS_DP + 36);
     }
 
     /** Places the name, chip, slider and buttons for portrait or landscape. */
@@ -297,7 +370,7 @@ final class DoorbellView extends FrameLayout {
         }
         arranged = getWidth() > 0;
         landscape = wide;
-        for (View piece : new View[] {title, speaking, volumeRow, buttons, spacer, cardBox, hint, topRow}) detach(piece);
+        for (View piece : new View[] {title, speaking, volumeRow, buttons, buttonRow, buttonColumn, spacer, spacerEnd, cardBox, cardScroll, hint, topRow}) detach(piece);
         title.setMaxWidth(Integer.MAX_VALUE);
         topBox.setBackground(null);
         bottomBox.setBackground(null);
@@ -312,14 +385,21 @@ final class DoorbellView extends FrameLayout {
             videoParams.rightMargin = columnPx;
             title.setGravity(Gravity.CENTER);
             side.addView(title, new LinearLayout.LayoutParams(fill, wrap));
-            side.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1));
+            // Landscape column setting: the controls at the bottom (the room above them), centred, or at the top.
+            if (columnPosition != COLUMN_TOP) side.addView(spacer, new LinearLayout.LayoutParams(1, 0, 1));
+            side.addView(hint, hintParams());
             if (cardsRight) side.addView(cardBox, new LinearLayout.LayoutParams(fill, wrap));
             side.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
-            side.addView(buttons, new LinearLayout.LayoutParams(fill, wrap));
+            buttonColumn.addView(buttons, new ScrollView.LayoutParams(fill, wrap));
+            side.addView(buttonColumn, new LinearLayout.LayoutParams(fill, wrap));
+            if (columnPosition != COLUMN_BOTTOM) side.addView(spacerEnd, new LinearLayout.LayoutParams(1, 0, 1));
             buttons.setOrientation(LinearLayout.VERTICAL);
             addView(side, new LayoutParams(columnPx, LayoutParams.MATCH_PARENT, Gravity.END));
-            if (!cards.isEmpty() && !cardsRight) {
+            cardBox.setGravity(Gravity.TOP);
+            if (!visibleCards().isEmpty() && !cardsRight) {
                 videoParams.leftMargin = columnPx;
+                // Their own column starts at the top as it always did, unless the setting centres the controls.
+                cardBox.setGravity(columnPosition == COLUMN_CENTRE ? Gravity.CENTER_VERTICAL : Gravity.TOP);
                 cardSide.addView(cardBox, new ScrollView.LayoutParams(fill, wrap));
                 addView(cardSide, new LayoutParams(columnPx, LayoutParams.MATCH_PARENT, Gravity.START));
             }
@@ -342,13 +422,12 @@ final class DoorbellView extends FrameLayout {
             topBox.addView(topRow, new LinearLayout.LayoutParams(fill, wrap));
             topBox.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[] {0xB3000000, 0x00000000}));
             addView(topBox, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.TOP));
-            LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(wrap, wrap);
-            hintParams.gravity = Gravity.CENTER_HORIZONTAL;
-            hintParams.bottomMargin = theme.px(8);
-            bottomBox.addView(hint, hintParams);
+            bottomBox.addView(hint, hintParams());
+            cardBox.setGravity(Gravity.TOP);
             bottomBox.addView(cardBox, new LinearLayout.LayoutParams(fill, wrap));
             bottomBox.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
-            bottomBox.addView(buttons, new LinearLayout.LayoutParams(fill, wrap));
+            buttonRow.addView(buttons, new FrameLayout.LayoutParams(wrap, wrap));
+            bottomBox.addView(buttonRow, new LinearLayout.LayoutParams(fill, wrap));
             buttons.setOrientation(LinearLayout.HORIZONTAL);
             bottomBox.setBackground(new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP, new int[] {0xCC000000, 0x99000000, 0x00000000}));
             addView(bottomBox, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
@@ -361,9 +440,14 @@ final class DoorbellView extends FrameLayout {
             // The chip floats just under the name, over the picture's edge, and takes no room: nothing moves when the
             // microphone goes on or off.
             addView(speaking, new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL));
-            bottomBox.addView(cardBox, new LinearLayout.LayoutParams(fill, wrap));
+            bottomBox.addView(hint, hintParams());
+            // The cards scroll once they would push the picture smaller than the full width (placeVideo sets the cap).
+            cardBox.setGravity(Gravity.TOP);
+            cardScroll.addView(cardBox, new ScrollView.LayoutParams(fill, wrap));
+            bottomBox.addView(cardScroll, new LinearLayout.LayoutParams(fill, wrap));
             bottomBox.addView(volumeRow, new LinearLayout.LayoutParams(fill, wrap));
-            bottomBox.addView(buttons, new LinearLayout.LayoutParams(fill, wrap));
+            buttonRow.addView(buttons, new FrameLayout.LayoutParams(wrap, wrap));
+            bottomBox.addView(buttonRow, new LinearLayout.LayoutParams(fill, wrap));
             buttons.setOrientation(LinearLayout.HORIZONTAL);
             addView(bottomBox, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM));
         }
@@ -375,6 +459,7 @@ final class DoorbellView extends FrameLayout {
             buttons.setVisibility(VISIBLE);
         }
         buildCards();
+        placeClose();
         placeVideo();
         if (overlay) scheduleHide();  // also for a viewer that opens straight into a call
         else removeCallbacks(hideControls);
@@ -385,7 +470,7 @@ final class DoorbellView extends FrameLayout {
      * instead, shared when there are two. The picture's own shape once the decoder knows it, 4:3 until then.
      */
     private int columnPx() {
-        int columns = !cards.isEmpty() && !cardsRight ? 2 : 1;
+        int columns = !visibleCards().isEmpty() && !cardsRight ? 2 : 1;
         float aspect = videoWidth > 0 && videoHeight > 0 ? videoWidth / (float) videoHeight : 4f / 3f;
         int spare = getWidth() - columns * theme.px(SIDE_DP) - Math.round(getHeight() * aspect);
         return theme.px(SIDE_DP) + Math.max(0, spare) / columns;
@@ -402,6 +487,17 @@ final class DoorbellView extends FrameLayout {
                 speaking.setLayoutParams(chip);
             }
         }
+        if (!overlay && cardScroll.getParent() != null && getWidth() > 0) {
+            // The cards take what the name, the picture at the full width and the buttons leave; beyond that they
+            // scroll. At least one row shows, even if the picture has to give up some height for it.
+            float aspect = videoWidth > 0 && videoHeight > 0 ? videoWidth / (float) videoHeight : 4f / 3f;
+            int rest = bottomBox.getHeight() - cardScroll.getHeight();
+            int cap = Math.max(theme.px(CARD_DP + 24), getHeight() - topBox.getHeight() - Math.round(getWidth() / aspect) - rest);
+            if (cap != cardScroll.cap) {
+                cardScroll.cap = cap;
+                cardScroll.requestLayout();
+            }
+        }
         LayoutParams params = (LayoutParams) video.getLayoutParams();
         int top = topBox.getHeight(), bottom = bottomBox.getHeight();
         // The overlay layout, or a screen too low for both, gets the picture behind the controls.
@@ -414,6 +510,78 @@ final class DoorbellView extends FrameLayout {
 
     private static void detach(View view) {
         if (view.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) view.getParent()).removeView(view);
+    }
+
+    /** A scroll view no higher than its cap: the portrait cards, which must not push the picture smaller. */
+    private static final class CappedScroll extends ScrollView {
+        int cap = Integer.MAX_VALUE;
+
+        CappedScroll(Context context) {
+            super(context);
+            setVerticalFadingEdgeEnabled(true);  // a faded last row says there is more
+        }
+
+        @Override protected void onMeasure(int widthSpec, int heightSpec) {
+            if (cap == Integer.MAX_VALUE) {  // no cap yet: a measure spec has no room for MAX_VALUE
+                super.onMeasure(widthSpec, heightSpec);
+                return;
+            }
+            int mode = MeasureSpec.getMode(heightSpec), size = MeasureSpec.getSize(heightSpec);
+            int limit = mode == MeasureSpec.UNSPECIFIED ? cap : Math.min(cap, size);
+            super.onMeasure(widthSpec, MeasureSpec.makeMeasureSpec(limit, MeasureSpec.AT_MOST));
+        }
+    }
+
+    /** What a round card or button has to say, which it has no room for: centred above the cards for a moment. */
+    private LinearLayout.LayoutParams hintParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.gravity = Gravity.CENTER_HORIZONTAL;
+        params.bottomMargin = theme.px(8);
+        return params;
+    }
+
+    /**
+     * Without Hang up among the call buttons, a small close button in the top corner is the way out, with the
+     * auto-close countdown around it. The name and the speaking chip keep clear of it.
+     */
+    private void placeClose() {
+        if (close != null) removeView(close);
+        close = null;
+        title.setPadding(0, 0, 0, 0);
+        topRow.setPadding(0, 0, 0, 0);
+        if (hasHangUp()) return;
+        Context context = getContext();
+        int size = theme.px(40), ring = theme.px(48);
+        FrameLayout frame = new FrameLayout(context);
+        frame.addView(new CountdownRing(context, Color.WHITE), new LayoutParams(ring, ring));
+        TextView circle = new TextView(context);
+        GradientDrawable round = new GradientDrawable();
+        round.setShape(GradientDrawable.OVAL);
+        round.setColor(0x99000000);
+        circle.setBackground(round);
+        Drawable drawable = icon("mdi:close");
+        if (drawable != null) {
+            drawable.setBounds(0, 0, theme.px(22), theme.px(22));
+            drawable.setTint(Color.WHITE);
+            circle.setCompoundDrawables(drawable, null, null, null);
+            circle.setPadding((size - theme.px(22)) / 2, 0, 0, 0);
+        }
+        circle.setGravity(Gravity.CENTER_VERTICAL);
+        circle.setContentDescription(texts.close());
+        frame.addView(circle, new LayoutParams(size, size, Gravity.CENTER));
+        frame.setOnClickListener(v -> safely(callback::hangUp));
+        circle.setOnClickListener(v -> safely(callback::hangUp));
+        LayoutParams params = new LayoutParams(ring, ring, Gravity.TOP | Gravity.END);
+        params.topMargin = params.rightMargin = theme.px(10);
+        addView(frame, params);
+        close = frame;
+        int clear = ring + theme.px(10);
+        if (overlay || landscape) {
+            // The name on the left, or in the narrow column: room on the close button's side only, or it wraps.
+            (overlay ? topRow : title).setPadding(0, 0, overlay ? clear : clear - theme.px(8), 0);
+        } else {
+            title.setPadding(clear, 0, clear, 0);  // centred in the screen: kept clear on both sides
+        }
     }
 
     private LinearLayout.LayoutParams chipParams() {
@@ -596,7 +764,11 @@ final class DoorbellView extends FrameLayout {
         if (state == State.IDLE) talking = false;  // the plugin stops push to talk with the call
         this.speakerOn = speakerOn;
         this.micOn = micOn;
-        render();
+        if (changed && arranged && followsState()) {
+            relayout();  // cards and buttons that show only while ringing or in a call: the layout follows
+        } else {
+            render();
+        }
         if (changed) setControlsHidden(false);  // a new state shows what it offers, then hides again in a call
         if (answered && overlay) {
             removeCallbacks(hideControls);
@@ -624,42 +796,81 @@ final class DoorbellView extends FrameLayout {
             renderPending = true;
             return;
         }
-        // Every position keeps one job: left (top) answers, then is the microphone; middle is the speaker; right
-        // (bottom) hangs up.
-        // Speaker and microphone are toggles: the same icon and label, the circle shows whether they are on.
+        // The call buttons in the user's order (Call buttons setting). The viewer's own keep one job each through the
+        // call: Answer becomes the microphone, Hang up becomes End call. Speaker and microphone are toggles: the same
+        // icon and label, the circle shows whether they are on.
         buttons.removeAllViews();
-        // Push to talk: holding answers and talks at once, so the button is there from the ring on.
-        View first = pushToTalk
-            ? holdButton()
-            : state == State.IN_CALL
-                ? makeButton("mdi:microphone", texts.microphone(), Style.TOGGLE, micOn, callback::toggleMic)
-                : makeButton("mdi:phone", texts.answer(), Style.ANSWER, false, callback::answer);
-        View speaker = makeButton("mdi:volume-high", texts.speaker(), Style.TOGGLE, speakerOn, state == State.RINGING ? callback::speaker : callback::toggleSpeaker);
-        // Push to talk has no ringing screen of its own: Hold to talk answers, so End call is what this button does.
-        View last = makeButton("mdi:phone-hangup", state == State.IN_CALL || pushToTalk ? texts.endCall() : texts.hangUp(), Style.HANG_UP, false, callback::hangUp);
+        for (CardHolder holder : callHolders) holder.cancel();
+        callHolders.clear();
+        List<Cards.Card> shown = visibleCallButtons();
+        List<View> views = new ArrayList<>();
+        for (Cards.Card button : shown) views.add(callButton(button));
         int wrap = LinearLayout.LayoutParams.WRAP_CONTENT, fill = LinearLayout.LayoutParams.MATCH_PARENT;
-        if (landscape && columnLevel >= 1) {
+        boolean usual = shown.size() == 3 && shown.get(0).role == Cards.Role.ANSWER && shown.get(1).role == Cards.Role.SPEAKER
+            && shown.get(2).role == Cards.Role.HANG_UP;
+        if (landscape && columnLevel >= 1 && usual) {
             // A low column: Speaker on top, the other two side by side, each keeping its place from the other layouts.
             buttons.setOrientation(LinearLayout.VERTICAL);
             LinearLayout top = new LinearLayout(getContext());
             top.setGravity(Gravity.CENTER_HORIZONTAL);
-            top.addView(speaker, new LinearLayout.LayoutParams(wrap, wrap));
+            top.addView(views.get(1), new LinearLayout.LayoutParams(wrap, wrap));
             LinearLayout bottom = new LinearLayout(getContext());
             bottom.setOrientation(LinearLayout.HORIZONTAL);
-            bottom.addView(first, new LinearLayout.LayoutParams(0, wrap, 1));
-            bottom.addView(last, new LinearLayout.LayoutParams(0, wrap, 1));
+            bottom.addView(views.get(0), new LinearLayout.LayoutParams(0, wrap, 1));
+            bottom.addView(views.get(2), new LinearLayout.LayoutParams(0, wrap, 1));
             buttons.addView(top, new LinearLayout.LayoutParams(fill, wrap));
             buttons.addView(bottom, new LinearLayout.LayoutParams(fill, wrap));
+        } else if (landscape && columnLevel >= 1) {
+            // Any other set in a low column: two to a row in the user's order; an odd last one centred.
+            buttons.setOrientation(LinearLayout.VERTICAL);
+            for (int i = 0; i < views.size(); i += 2) {
+                LinearLayout row = new LinearLayout(getContext());
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setWeightSum(2);
+                row.setGravity(Gravity.CENTER_HORIZONTAL);
+                row.addView(views.get(i), new LinearLayout.LayoutParams(0, wrap, 1));
+                if (i + 1 < views.size()) row.addView(views.get(i + 1), new LinearLayout.LayoutParams(0, wrap, 1));
+                buttons.addView(row, new LinearLayout.LayoutParams(fill, wrap));
+            }
         } else {
-            for (View button : new View[] {first, speaker, last}) {
-                LinearLayout.LayoutParams place = landscape ? new LinearLayout.LayoutParams(fill, wrap) : new LinearLayout.LayoutParams(0, wrap, 1);
+            boolean scrolls = !landscape && rowOverflows();
+            // A row that scrolls is spaced so the next button shows half at the edge: there is more.
+            int cell = theme.px(buttonDp + 16 + 8);
+            if (scrolls) {
+                int room = getWidth() - theme.px(48);
+                int whole = room / cell;
+                if (whole >= 2) cell = Math.round(room / (whole - 0.5f));
+            }
+            for (View button : views) {
+                LinearLayout.LayoutParams place = landscape ? new LinearLayout.LayoutParams(fill, wrap)
+                    : scrolls ? new LinearLayout.LayoutParams(cell, wrap) : new LinearLayout.LayoutParams(0, wrap, 1);
                 if (landscape) place.topMargin = theme.px(4);
                 buttons.addView(button, place);
             }
         }
-        if (controlsHidden) buttons.setVisibility(INVISIBLE);
+        buttons.setVisibility(views.isEmpty() ? GONE : VISIBLE);
+        if (controlsHidden && !views.isEmpty()) buttons.setVisibility(INVISIBLE);
         if (landscape) post(this::fitColumn);
         if (landscape && columnLevel >= 1) evenLabelsWhenLaidOut();
+    }
+
+    /** One call button: the viewer's own for its role, or the user's own action as a round button of the same size. */
+    private View callButton(Cards.Card button) {
+        switch (button.role) {
+            case ANSWER:
+                // Push to talk: holding answers and talks at once, so the button is there from the ring on.
+                if (pushToTalk) return holdButton();
+                return state == State.IN_CALL
+                    ? makeButton("mdi:microphone", texts.microphone(), Style.TOGGLE, micOn, callback::toggleMic)
+                    : makeButton("mdi:phone", texts.answer(), Style.ANSWER, false, callback::answer);
+            case SPEAKER:
+                return makeButton("mdi:volume-high", texts.speaker(), Style.TOGGLE, speakerOn, state == State.RINGING ? callback::speaker : callback::toggleSpeaker);
+            case HANG_UP:
+                // Push to talk has no ringing screen of its own: Hold to talk answers, so End call is what this button does.
+                return makeButton("mdi:phone-hangup", state == State.IN_CALL || pushToTalk ? texts.endCall() : texts.hangUp(), Style.HANG_UP, false, callback::hangUp);
+            default:
+                return roundButton(button, buttonDp, callHolders);
+        }
     }
 
     /** Every text a button's place shows in any state, so its label gets one size from the ring through the call. */
@@ -724,7 +935,8 @@ final class DoorbellView extends FrameLayout {
 
     /**
      * Landscape: if the column does not fit the screen's height, measured as drawn, first the cards go back to their
-     * own column, then the buttons take the low layout, then they lose their labels. A screen's size starts it over.
+     * own column, then the buttons take the low layout, then they lose their labels, then they take the smallest
+     * size; beyond that the buttons scroll in their part of the column. A screen's size starts it over.
      */
     private void fitColumn() {
         if (!landscape || !arranged || getHeight() == 0) return;
@@ -961,19 +1173,39 @@ final class DoorbellView extends FrameLayout {
 
     /** The cards from the settings; a change of cards rearranges, since landscape gives them a column only if any. */
     void setCards(List<Cards.Card> cards) {
-        boolean column = this.cards.isEmpty() != cards.isEmpty() || this.cards.size() != cards.size();
         this.cards = cards;
-        if (landscape && arranged) {
+        relayout();
+    }
+
+    /** The call buttons from the settings, in the user's order. */
+    void setCallButtons(List<Cards.Card> buttons) {
+        callButtons = buttons;
+        relayout();
+    }
+
+    /** The landscape column setting: COLUMN_BOTTOM, COLUMN_CENTRE or COLUMN_TOP. */
+    void setColumnPosition(int position) {
+        if (position == columnPosition) return;
+        columnPosition = position;
+        relayout();
+    }
+
+    /** Cards or buttons changed: sizes, columns and the close button follow, from the start of the fitting. */
+    private void relayout() {
+        if (!arranged) {
+            buildCards();
+            return;
+        }
+        columnLevel = 0;
+        if (landscape) {
             cardsRight = cardsFitRight(getHeight());
             buttonDp = buttonDpFor(true, getHeight(), cardsRight);
-        }
-        if (column && arranged) {
-            arrange(landscape);
-            applyPadding();
-            render();
         } else {
-            buildCards();
+            buttonDp = rowButtonDp(getWidth(), overlay ? OVERLAY_BUTTON_DP : 76);
         }
+        arrange(landscape);
+        applyPadding();
+        render();
     }
 
     /** A Home Assistant entity's new snapshot, from the plugin's subscription. */
@@ -987,10 +1219,12 @@ final class DoorbellView extends FrameLayout {
         }
     }
 
-    /** How a card's action went: shown in place of its state for a moment; null clears it. */
+    /** How a card's or call button's action went: shown in place of its state for a moment; null clears it. */
     void cardFeedback(Cards.Card card, String text) {
-        for (CardHolder holder : cardHolders) {
-            if (holder.card.row == card.row) holder.feedback(text);
+        for (List<CardHolder> holders : java.util.Arrays.asList(cardHolders, callHolders)) {
+            for (CardHolder holder : holders) {
+                if (holder.card.list.equals(card.list) && holder.card.row == card.row) holder.feedback(text);
+            }
         }
     }
 
@@ -998,15 +1232,22 @@ final class DoorbellView extends FrameLayout {
         for (CardHolder holder : cardHolders) holder.cancel();
         cardHolders.clear();
         cardBox.removeAllViews();
-        cardBox.setVisibility(cards.isEmpty() ? GONE : controlsHidden ? INVISIBLE : VISIBLE);
+        List<Cards.Card> shown = visibleCards();
+        cardBox.setVisibility(shown.isEmpty() ? GONE : controlsHidden ? INVISIBLE : VISIBLE);
         if (overlay) {
-            // One row of round buttons, as on Apple Home's camera view: the icon's colour carries the state.
+            // One row of round buttons, as on Apple Home's camera view: the icon's colour carries the state. More than
+            // the width takes scroll sideways; a row that fits stays centred.
+            android.widget.HorizontalScrollView scroll = new android.widget.HorizontalScrollView(getContext());
+            scroll.setHorizontalScrollBarEnabled(false);
+            scroll.setHorizontalFadingEdgeEnabled(true);
+            scroll.setFillViewport(true);
             LinearLayout row = new LinearLayout(getContext());
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_HORIZONTAL);
-            cardBox.addView(row, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-            for (int i = 0; i < cards.size(); i++) {
-                CardHolder holder = new CardHolder(getContext(), cards.get(i), true);
+            scroll.addView(row, new FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT));
+            cardBox.addView(scroll, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            for (int i = 0; i < shown.size(); i++) {
+                CardHolder holder = new CardHolder(getContext(), shown.get(i), true, 0, false);
                 cardHolders.add(holder);
                 LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(theme.px(ROUND_CARD_DP), theme.px(ROUND_CARD_DP));
                 if (i > 0) params.leftMargin = theme.px(16);
@@ -1015,11 +1256,13 @@ final class DoorbellView extends FrameLayout {
             }
             return;
         }
+        List<Cards.Card> tiles = new ArrayList<>(), rounds = new ArrayList<>();
+        for (Cards.Card card : shown) (card.button ? rounds : tiles).add(card);
         int gap = theme.px(landscape ? 8 : 12);
         // Landscape: one per row in the column. Portrait: two per row, always half wide; an odd last one is centred.
         int perRow = landscape ? 1 : 2;
         LinearLayout row = null;
-        for (int i = 0; i < cards.size(); i++) {
+        for (int i = 0; i < tiles.size(); i++) {
             if (i % perRow == 0) {
                 row = new LinearLayout(getContext());
                 row.setOrientation(LinearLayout.HORIZONTAL);
@@ -1029,15 +1272,70 @@ final class DoorbellView extends FrameLayout {
                 if (i > 0) rowParams.topMargin = gap;
                 cardBox.addView(row, rowParams);
             }
-            CardHolder holder = new CardHolder(getContext(), cards.get(i), false);
+            CardHolder holder = new CardHolder(getContext(), tiles.get(i), false, 0, false);
             cardHolders.add(holder);
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, theme.px(64), 1);
             if (i % perRow > 0) params.leftMargin = gap;
             // A lone last card loses the same gap, so it is exactly as wide as the others.
-            if (perRow == 2 && i == cards.size() - 1 && i % 2 == 0) params.leftMargin = params.rightMargin = gap / 2;
+            if (perRow == 2 && i == tiles.size() - 1 && i % 2 == 0) params.leftMargin = params.rightMargin = gap / 2;
             row.addView(holder.root, params);
             holder.render();
         }
+        // Button-style cards after the tiles: round, with their label below, like the call buttons. Portrait gives them
+        // the call buttons' size, as many to a row as fit; the landscape column the low size, two to a row.
+        if (rounds.isEmpty()) return;
+        int size = landscape ? LOW_BUTTON_DP : 76;
+        int cell = theme.px(size + 16 + 8);
+        int width = (landscape ? columnPx - theme.px(16) : getWidth() - theme.px(48));
+        int per = Math.max(1, Math.min(rounds.size(), width / cell));
+        for (int i = 0; i < rounds.size(); i++) {
+            if (i % per == 0) {
+                row = new LinearLayout(getContext());
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                row.setGravity(Gravity.CENTER_HORIZONTAL);
+                LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                if (i > 0 || !tiles.isEmpty()) rowParams.topMargin = gap;
+                cardBox.addView(row, rowParams);
+            }
+            View button = roundButton(rounds.get(i), size, cardHolders);
+            row.addView(button, new LinearLayout.LayoutParams(cell, LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
+    }
+
+    /**
+     * A round card or call button of the user's own, in the call buttons' frame: the circle, the label below it, and
+     * the frame's ring room, so it lines up with Answer and Hang up. Its holder goes into holders.
+     */
+    private View roundButton(Cards.Card card, int sizeDp, List<CardHolder> holders) {
+        Context context = getContext();
+        int size = theme.px(sizeDp), gap = theme.px(8);
+        LinearLayout column = new LinearLayout(context);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setGravity(Gravity.CENTER_HORIZONTAL);
+        boolean labelled = !(landscape && columnLevel >= 2 && card.list.equals(Cards.CALL_BUTTONS));
+        CardHolder holder = new CardHolder(context, card, true, size, labelled);
+        holders.add(holder);
+        FrameLayout frame = new FrameLayout(context);
+        frame.addView(holder.root, new LayoutParams(size, size, Gravity.CENTER));
+        column.addView(frame, new LinearLayout.LayoutParams(size + 2 * gap, size + 2 * gap));
+        if (holder.caption != null) {
+            LinearLayout.LayoutParams captionParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            captionParams.topMargin = theme.px(2);
+            if (landscape && columnLevel >= 1 && card.list.equals(Cards.CALL_BUTTONS)) {
+                captionParams.width = LinearLayout.LayoutParams.MATCH_PARENT;  // side by side: evenLabels sizes them alike
+                holder.caption.setMaxLines(1);
+                holder.caption.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            }
+            column.addView(holder.caption, captionParams);
+        }
+        holder.render();
+        return column;
+    }
+
+    /** Whether a colour is light enough to want a dark icon on it, as amber and white do. */
+    private static boolean light(int color) {
+        int r = (color >> 16) & 0xFF, g = (color >> 8) & 0xFF, b = color & 0xFF;
+        return 0.299 * r + 0.587 * g + 0.114 * b > 160;
     }
 
     private static int tintColor(Cards.Tint tint) {
@@ -1058,11 +1356,13 @@ final class DoorbellView extends FrameLayout {
         final ImageView icon;
         final GradientDrawable circle = new GradientDrawable();
         final TextView label, state;
-        final boolean round;  // the overlay's round button: no label or state, feedback goes to the hint
+        final TextView caption;  // a round one's label below it, as the call buttons have; null without
+        final boolean round;  // round: no label or state inside, feedback goes to the hint
         private String feedback;
         private final Runnable clearFeedback = () -> feedback(null);
 
-        CardHolder(Context context, Cards.Card card, boolean round) {
+        /** sizePx: a round one's size, which scales its icon as the call buttons' (0 keeps the icon's own size). */
+        CardHolder(Context context, Cards.Card card, boolean round, int sizePx, boolean captioned) {
             this.card = card;
             this.round = round;
             root = new HoldFrame(context);
@@ -1072,12 +1372,28 @@ final class DoorbellView extends FrameLayout {
                 circle.setShape(GradientDrawable.OVAL);
                 root.setBackground(circle);
                 icon = new ImageView(context);
-                icon.setScaleType(ImageView.ScaleType.CENTER);
+                if (sizePx > 0) {
+                    int pad = (sizePx - Math.round(sizePx * 34f / 76)) / 2;  // the call buttons' 34 dp icon in 76 dp
+                    icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                    icon.setPadding(pad, pad, pad, pad);
+                } else {
+                    icon.setScaleType(ImageView.ScaleType.CENTER);
+                }
                 root.addView(icon, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
                 label = state = null;
+                if (captioned) {
+                    caption = new TextView(context);
+                    theme.styleText(caption, 14, 500, "onSurface");
+                    caption.setTextColor(Color.WHITE);
+                    caption.setShadowLayer(theme.px(3), 0, 0, Color.BLACK);
+                    caption.setGravity(Gravity.CENTER);
+                } else {
+                    caption = null;
+                }
                 listen(card);
                 return;
             }
+            caption = null;
             root.setOrientation(LinearLayout.HORIZONTAL);
             root.setGravity(Gravity.CENTER_VERTICAL);
             // The landscape column is narrow: a smaller circle and text leave the label room.
@@ -1127,14 +1443,22 @@ final class DoorbellView extends FrameLayout {
             int accent = tintColor(look.tint);
             if (round) {
                 // Not by colour alone: an active state (on, locked, armed) fills the circle, an inactive one is a ring.
-                boolean active = look.tint != Cards.Tint.NONE;
-                circle.setColor(active ? accent : 0xB3202124);
-                circle.setStroke(theme.px(2), active ? accent : 0x80FFFFFF);
+                // A fixed colour fills it always.
+                boolean fixed = card.color != 0;
+                boolean active = fixed || look.tint != Cards.Tint.NONE;
+                int fill = fixed ? card.color : accent;
+                circle.setColor(active ? fill : 0xB3202124);
+                circle.setStroke(fixed ? 0 : theme.px(2), active ? fill : 0x80FFFFFF);
                 Drawable drawable = DoorbellView.this.icon(look.icon);
                 if (drawable == null) drawable = DoorbellView.this.icon(card.action ? "mdi:gesture-tap" : "mdi:eye");
                 if (drawable != null) {
-                    drawable.setTint(active ? 0xFF202124 : Color.WHITE);
+                    // State colours carry a dark icon, as before; a fixed colour one that reads on it.
+                    drawable.setTint(!active ? Color.WHITE : !fixed || light(fill) ? 0xFF202124 : Color.WHITE);
                     icon.setImageDrawable(drawable);
+                }
+                if (caption != null) {
+                    caption.setText(look.label);
+                    caption.setTag(new String[] {look.label});  // evenLabels measures it with the call buttons'
                 }
                 root.setAlpha(look.unavailable || RUNNING.equals(feedback) ? 0.5f : 1f);
                 root.setContentDescription(look.label + (look.state.isEmpty() ? "" : ", " + look.state));
@@ -1144,7 +1468,8 @@ final class DoorbellView extends FrameLayout {
             String shown = feedback != null ? feedback : look.state;
             state.setText(shown);
             state.setVisibility(shown.isEmpty() ? GONE : VISIBLE);
-            circle.setColor(look.tint == Cards.Tint.NONE ? 0x26FFFFFF : (accent & 0x00FFFFFF) | 0x40000000);
+            if (card.color != 0) accent = card.color;
+            circle.setColor(look.tint == Cards.Tint.NONE && card.color == 0 ? 0x26FFFFFF : (accent & 0x00FFFFFF) | 0x40000000);
             Drawable drawable = DoorbellView.this.icon(look.icon);
             if (drawable == null) drawable = DoorbellView.this.icon(card.action ? "mdi:gesture-tap" : "mdi:eye");
             if (drawable != null) {

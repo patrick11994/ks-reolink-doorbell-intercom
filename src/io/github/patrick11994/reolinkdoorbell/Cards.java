@@ -13,25 +13,57 @@ import java.util.Map;
  * Assistant's tile card. The look (label, icon, state text, colour) follows the entity, the way Home Assistant shows it.
  */
 final class Cards {
-    static final int MAX = 4;
+    /** Kiosk Satellite's own limit on a list setting's rows; the plugin sets none of its own. */
+    static final int MAX = 32;
+    static final String CARDS = "cards", CALL_BUTTONS = "callButtons";
 
-    /** One card as the user set it up; row is its place in the list, which runAction names. */
+    /** What a call button row is: one of the viewer's own buttons, or the user's own action. */
+    enum Role { CARD, ANSWER, SPEAKER, HANG_UP }
+
+    /** When a card or button shows. */
+    enum Show { ALWAYS, RINGING, CALL }
+
+    /** One card or call button as the user set it up; row is its place in its list, which runAction names. */
     static final class Card {
+        final String list;
         final int row;
+        final Role role;
         final String label, icon, entityId;
         final boolean action, confirm;
+        final boolean button;  // the Button style: round, like the call buttons, instead of a tile
+        final int color;  // a fixed colour, 0xAARRGGBB; 0 follows the entity's state
+        final Show show;
 
         Card(int row, String label, String icon, String entityId, boolean action, boolean confirm) {
+            this(CARDS, row, Role.CARD, label, icon, entityId, action, confirm, false, 0, Show.ALWAYS);
+        }
+
+        Card(String list, int row, Role role, String label, String icon, String entityId, boolean action, boolean confirm, boolean button,
+             int color, Show show) {
+            this.list = list;
             this.row = row;
+            this.role = role;
             this.label = label;
             this.icon = icon;
             this.entityId = entityId;
             this.action = action;
             this.confirm = confirm;
+            this.button = button;
+            this.color = color;
+            this.show = show;
         }
 
         String actionPath() {
-            return "cards." + row + ".action";
+            return list + "." + row + ".action";
+        }
+
+        /** Whether it shows in this state of the call: Show "In a call" also counts listening, not only talking. */
+        boolean shownWhen(RingController.State state) {
+            switch (show) {
+                case RINGING: return state == RingController.State.RINGING;
+                case CALL: return state == RingController.State.IN_CALL || state == RingController.State.LISTENING;
+                default: return true;
+            }
         }
 
         boolean hasEntity() {
@@ -71,9 +103,60 @@ final class Cards {
             boolean hasAction = action instanceof Map && !((Map<?, ?>) action).isEmpty();
             String entity = text(row.get("entity"));
             if (!hasAction && entity.isEmpty()) continue;
-            cards.add(new Card(i, text(row.get("label")), text(row.get("icon")), entity, hasAction, Boolean.TRUE.equals(row.get("confirm"))));
+            cards.add(new Card(CARDS, i, Role.CARD, text(row.get("label")), text(row.get("icon")), entity, hasAction, Boolean.TRUE.equals(row.get("confirm")),
+                text(row.get("style")).startsWith("Button"), color(row), show(row)));
         }
         return Collections.unmodifiableList(cards);
+    }
+
+    /** The viewer's own buttons in their usual order: the Call buttons list starts out as these. */
+    static final List<Card> DEFAULT_CALL_BUTTONS = Collections.unmodifiableList(java.util.Arrays.asList(
+        builtIn(0, Role.ANSWER), builtIn(1, Role.SPEAKER), builtIn(2, Role.HANG_UP)));
+
+    private static Card builtIn(int row, Role role) {
+        return new Card(CALL_BUTTONS, row, role, "", "", "", false, false, true, 0, Show.ALWAYS);
+    }
+
+    /**
+     * The call buttons in the user's order: the viewer's own (each at most once) and the user's own actions. Answer
+     * and Speaker may be left out, for a screen that only shows who is at the door; without Hang up the viewer shows
+     * a close button instead. No setting at all (a Kiosk Satellite that did not fill it in) is the usual three.
+     */
+    static List<Card> parseCallButtons(Object value) {
+        if (!(value instanceof List)) return DEFAULT_CALL_BUTTONS;
+        List<Card> buttons = new ArrayList<>();
+        java.util.Set<Role> seen = java.util.EnumSet.noneOf(Role.class);
+        List<?> rows = (List<?>) value;
+        for (int i = 0; i < rows.size() && buttons.size() < MAX; i++) {
+            if (!(rows.get(i) instanceof Map)) continue;
+            Map<?, ?> row = (Map<?, ?>) rows.get(i);
+            String kind = text(row.get("button"));
+            Role role = kind.startsWith("Answer") ? Role.ANSWER : kind.startsWith("Speaker") ? Role.SPEAKER : kind.startsWith("Hang up") ? Role.HANG_UP : Role.CARD;
+            if (role != Role.CARD) {
+                if (seen.add(role)) buttons.add(new Card(CALL_BUTTONS, i, role, "", "", "", false, false, true, 0, Show.ALWAYS));
+                continue;
+            }
+            Object action = row.get("action");
+            if (!(action instanceof Map) || ((Map<?, ?>) action).isEmpty()) continue;  // a button of one's own needs something to do
+            buttons.add(new Card(CALL_BUTTONS, i, Role.CARD, text(row.get("label")), text(row.get("icon")), "", true, Boolean.TRUE.equals(row.get("confirm")),
+                true, hex(text(row.get("color")), 0xFF5F6368), show(row)));  // no state to follow: always its own colour
+        }
+        return Collections.unmodifiableList(buttons);
+    }
+
+    /** The fixed colour of a card whose Colour is "Fixed colour", as 0xFFRRGGBB; 0 to follow the state. */
+    static int color(Map<?, ?> row) {
+        return text(row.get("colorMode")).startsWith("Fixed") ? hex(text(row.get("color")), 0) : 0;
+    }
+
+    /** #RRGGBB as 0xFFRRGGBB, or fallback when it is not one. */
+    private static int hex(String value, int fallback) {
+        return value.matches("#[0-9A-Fa-f]{6}") ? 0xFF000000 | Integer.parseInt(value.substring(1), 16) : fallback;
+    }
+
+    private static Show show(Map<?, ?> row) {
+        String show = text(row.get("show"));
+        return show.startsWith("While ringing") ? Show.RINGING : show.startsWith("In a call") ? Show.CALL : Show.ALWAYS;
     }
 
     /** The card's look from the entity's latest snapshot (KS's getHaEntityState format), or null before the first. */

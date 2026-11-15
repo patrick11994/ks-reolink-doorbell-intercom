@@ -33,12 +33,41 @@ public final class SettingsTest {
         parsed.put("language", s -> s.language);
         parsed.put("autoClose", s -> s.autoCloseMillis);
         parsed.put("maxCall", s -> s.maxCallMillis);
+        parsed.put("landscapeColumn", s -> s.columnPosition);
 
         String manifest = new String(Files.readAllBytes(Paths.get(System.getProperty("reolink.assets", "assets"), "..", "kiosk-satellite-plugin.json")), StandardCharsets.UTF_8);
         Matcher select = Pattern.compile("\"key\": \"(\\w+)\", \"type\": \"select\".*?\"options\": \\[([^\\]]*)\\]").matcher(manifest);
         Set<String> seen = new HashSet<>();
+        // Choices inside a list's rows: read through the list, with a row that has an action and a colour.
+        Map<String, Function<ReolinkPlugin.Settings, Object>> callRow = new HashMap<>(), cardRow = new HashMap<>();
+        callRow.put("button", s -> s.callButtons.isEmpty() ? "none" : s.callButtons.get(0).role);
+        callRow.put("show", s -> s.callButtons.get(0).show);
+        cardRow.put("style", s -> s.cards.get(0).button);
+        cardRow.put("colorMode", s -> s.cards.get(0).color);
+        cardRow.put("show", s -> s.cards.get(0).show);
+        int callStart = manifest.indexOf("\"key\": \"callButtons\""), cardStart = manifest.indexOf("\"key\": \"cards\"");
+        int listsEnd = manifest.indexOf("\"key\": \"landscapeColumn\"");
         while (select.find()) {
             String key = select.group(1);
+            int at = select.start();
+            String list = at > callStart && at < cardStart ? "callButtons" : at > cardStart && at < listsEnd ? "cards" : null;
+            if (list != null) {
+                Function<ReolinkPlugin.Settings, Object> field = (list.equals("cards") ? cardRow : callRow).get(key);
+                if (field == null) throw new AssertionError(list + "." + key + " is a choice in the manifest that this test does not know: add it");
+                Map<Object, String> values = new HashMap<>();
+                Matcher option = Pattern.compile("\"([^\"]*)\"").matcher(select.group(2));
+                while (option.find()) {
+                    Map<String, Object> row = new HashMap<>();
+                    row.put("action", Collections.singletonMap("type", "x"));
+                    row.put("button", "Action");
+                    row.put("color", "#2E7D32");
+                    row.put(key, option.group(1));
+                    Object value = field.apply(new ReolinkPlugin.Settings(Collections.<String, Object>singletonMap(list, Collections.singletonList(row))));
+                    String other = values.put(value, option.group(1));
+                    if (other != null) throw new AssertionError(list + "." + key + ": \"" + option.group(1) + "\" reads the same as \"" + other + "\"");
+                }
+                continue;
+            }
             Function<ReolinkPlugin.Settings, Object> field = parsed.get(key);
             if (field == null) throw new AssertionError(key + " is a choice in the manifest that this test does not know: add it");
             seen.add(key);

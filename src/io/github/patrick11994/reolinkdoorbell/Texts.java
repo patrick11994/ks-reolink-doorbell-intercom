@@ -145,6 +145,7 @@ final class Texts {
     String holdToTalk() { return get("holdToTalk"); }
     String holdToTalkHint() { return get("holdToTalkHint"); }
     String connecting() { return get("connecting"); }
+    String close() { return get("close"); }
     String noPictureYet() { return get("noPictureYet"); }
     String noVideo() { return get("noVideo"); }
     String videoStopped() { return get("videoStopped"); }
