@@ -187,11 +187,16 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     }
 
     @Override public void configure(Map<String, Object> values) {
-        Settings previous = settings;
-        settings = new Settings(values);
         synchronized (valuesLock) {
             this.values = new HashMap<>(values);
         }
+        apply(values);
+    }
+
+    /** A settings change: from the settings page (configure), or from Home Assistant (control, values kept as remembered). */
+    private void apply(Map<String, Object> values) {
+        Settings previous = settings;
+        settings = new Settings(values);
         baichuanTalkRefused = false;
         baichuanVideoFailed = false;
         texts = Texts.of(settings.language);
@@ -339,12 +344,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         client.start();
     }
 
-    // A press while Ring on this device was off: kept from the controller until the doorbell lets go of it, so
-    // switching ringing on in the middle neither rings halfway nor counts the press twice. Guarded by visitorLock,
-    // never by the plugin's own lock: the controller calls back into that one while holding its own.
-    private final Object visitorLock = new Object();
-    private boolean visitorBefore, silenced;
-    private long silencedAt;
+    // Guarded by its own lock, never the plugin's: the controller calls back into that one while holding its own.
+    private final PressGate pressGate = new PressGate();
 
     /**
      * The doorbell's visitor state, from Baichuan or ONVIF. Ring on this device (#19) off: no chime, screen or call
@@ -352,23 +353,13 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
      * The controller then does not see the press at all, so it neither rings nor counts a missed ring.
      */
     private void visitor(RingController c, boolean visitor) {
-        boolean silentPress = false, pass;
-        synchronized (visitorLock) {
-            long now = System.nanoTime() / 1_000_000;
-            // As the controller does: a press held past 20 s, or whose release went missing, counts again.
-            boolean press = visitor && (!visitorBefore || now - silencedAt > RingController.REPEAT_MILLIS);
-            visitorBefore = visitor;
-            if (!visitor) silenced = false;
-            if (press && !settings.ring) {
-                silenced = true;
-                silencedAt = now;
-                silentPress = true;
-            }
-            pass = !silenced;
+        PressGate.Result result;
+        synchronized (pressGate) {
+            result = pressGate.report(visitor, settings.ring, System.nanoTime() / 1_000_000);
         }
-        if (pass) {
+        if (result == PressGate.Result.PASS) {
             c.onVisitor(visitor);
-        } else if (silentPress) {
+        } else if (result == PressGate.Result.SILENT_PRESS) {
             log("ring: off on this device (Ring on this device), so only Last ring and Doorbell pressed");
             fireTrigger("doorbellPressed");
         }
@@ -1190,7 +1181,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             return;
         }
         log("controls: " + key + " set to " + value + " from Home Assistant");
-        configure(remember(key, value));
+        apply(remember(key, value));
     }
 
     private void publishText(String key, String name, String value) {
