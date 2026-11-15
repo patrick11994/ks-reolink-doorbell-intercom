@@ -713,6 +713,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private TalkChannel openTalk(Settings s) {
         baichuanTalk = null;
         final int generation = ++talkGeneration;
+        log("talk: starting over " + (s.talkPath.equals("ONVIF") || (s.talkPath.equals("Automatic") && baichuanTalkRefused) ? "ONVIF" : "Baichuan")
+            + " (Talk over: " + s.talkPath + ")");
         if (s.talkPath.equals("ONVIF") || (s.talkPath.equals("Automatic") && baichuanTalkRefused)) return onvifTalk(s, generation);
         final FallbackTalk[] fallback = new FallbackTalk[1];
         BaichuanTalk baichuan = new BaichuanTalk(s.host, 9000, s.username, s.password, s.channel, state -> {
