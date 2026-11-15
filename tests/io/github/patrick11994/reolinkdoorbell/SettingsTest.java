@@ -113,6 +113,12 @@ public final class SettingsTest {
         check(new ReolinkPlugin.Settings(before).sameConnection(new ReolinkPlugin.Settings(after)), true);
         after.put("events", "ONVIF");
         check(new ReolinkPlugin.Settings(before).sameConnection(new ReolinkPlugin.Settings(after)), false);
+        // Home Assistant controls: keys as Kiosk Satellite takes them (it refused "wakeScreen" on a panel), each a setting.
+        for (Map.Entry<String, String> control : ReolinkPlugin.CONTROLS.entrySet()) {
+            check(control.getKey().matches("[a-z][a-z0-9_]{0,39}"), true);
+            check(manifest.contains("\"key\": \"" + control.getValue() + "\""), true);
+        }
+
         // Ring on this device: on unless switched off, so installs from before it keep ringing.
         check(new ReolinkPlugin.Settings(new HashMap<>()).ring, true);
         check(new ReolinkPlugin.Settings(Collections.<String, Object>singletonMap("ring", false)).ring, false);

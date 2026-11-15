@@ -1092,7 +1092,14 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     // The settings as Kiosk Satellite last handed them over: a control from Home Assistant changes one and saves it.
     private volatile Map<String, Object> values = new HashMap<>();
-    private static final String[] SWITCHES = {"ring", "chime", "wakeScreen"};
+    // Entity keys (lowercase and underscores only, as Kiosk Satellite requires) and the settings they stand for.
+    static final Map<String, String> CONTROLS = new HashMap<>();
+    static {
+        CONTROLS.put("ring", "ring");
+        CONTROLS.put("chime", "chime");
+        CONTROLS.put("wake_screen", "wakeScreen");
+        CONTROLS.put("chime_volume", "chimeVolume");
+    }
 
     /** Ring on this device, Play a chime, Wake the screen and Chime volume as Home Assistant controls (#19). */
     private void publishControls() {
@@ -1103,8 +1110,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         try {
             h.publishSwitch("ring", t.ringControl(), s.ring);
             h.publishSwitch("chime", t.chimeControl(), s.chime);
-            h.publishSwitch("wakeScreen", t.wakeControl(), s.wakeScreen);
-            h.publishNumber("chimeVolume", t.chimeVolumeControl(), chimeVolumeRange(), (double) s.chimeVolume);
+            h.publishSwitch("wake_screen", t.wakeControl(), s.wakeScreen);
+            h.publishNumber("chime_volume", t.chimeVolumeControl(), chimeVolumeRange(), (double) s.chimeVolume);
         } catch (UnsupportedOperationException older) {
             // A Kiosk Satellite without writable entities: the settings page still has them.
         } catch (RuntimeException refused) {
@@ -1130,11 +1137,12 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private synchronized void control(String event, Map<String, Object> payload) {
         PluginHost h = host;
         if (h == null) return;
-        String key = event.substring(event.indexOf('.') + 1);
+        String key = CONTROLS.get(event.substring(event.indexOf('.') + 1));
         Object value;
-        if (event.startsWith("switch.") && java.util.Arrays.asList(SWITCHES).contains(key) && payload.get("on") instanceof Boolean) {
+        if (key == null) return;
+        if (event.startsWith("switch.") && !key.equals("chimeVolume") && payload.get("on") instanceof Boolean) {
             value = payload.get("on");
-        } else if (event.equals("number.chimeVolume") && payload.get("value") instanceof Number) {
+        } else if (event.equals("number.chime_volume") && payload.get("value") instanceof Number) {
             // Home Assistant does not snap to the step: to the setting's own 5s, within its range.
             long volume = Math.round(((Number) payload.get("value")).doubleValue() / 5) * 5;
             value = (int) Math.max(5, Math.min(100, volume));
