@@ -205,6 +205,7 @@ final class Texts {
     // Connection check
     String checking() { return get("checking"); }
     String checkOk() { return get("checkOk"); }
+    String checkOkHeadless() { return get("checkOkHeadless"); }
     String checkNotConfigured() { return get("checkNotConfigured"); }
     String checkUnreachable(String host) { return format("checkUnreachable", "host", host); }
     String checkLoginRefused() { return get("checkLoginRefused"); }

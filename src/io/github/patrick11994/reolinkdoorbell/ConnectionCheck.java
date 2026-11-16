@@ -89,10 +89,30 @@ final class ConnectionCheck {
         }
     }
 
+    /**
+     * A device without a screen, such as an Echo Dot (#20): it only plays the chime, so only button presses are checked,
+     * the way the event session gets them.
+     */
+    static Result runPresses(String host, int baichuanPort, int onvifPort, String eventsPath, String username, String password, Log log, Texts texts) {
+        try {
+            if (host.isEmpty() || username.isEmpty() || password.isEmpty()) return new Result(false, texts.checkNotConfigured());
+            Result problem = presses(host, baichuanPort, onvifPort, eventsPath, username, password, log, texts);
+            return problem != null ? problem : new Result(true, texts.checkOkHeadless());
+        } catch (RuntimeException error) {
+            return new Result(false, texts.checkFailed(describe(error)));
+        }
+    }
+
     private static Result checks(String host, int baichuanPort, int rtspPort, int onvifPort, String rtspPath, String videoPath, String talkPath, String eventsPath,
                                  String username, String password, int channel, Streams streams, Player player, Log log, Texts texts) {
         if (host.isEmpty() || username.isEmpty() || password.isEmpty()) return new Result(false, texts.checkNotConfigured());
-        // Button presses, the way the event session gets them: Baichuan, or ONVIF where nothing listens on 9000 (#14).
+        Result problem = presses(host, baichuanPort, onvifPort, eventsPath, username, password, log, texts);
+        if (problem != null) return problem;
+        return media(host, rtspPort, rtspPath, videoPath, talkPath, username, password, baichuanPort, channel, streams, player, log, texts);
+    }
+
+    /** Button presses, the way the event session gets them: Baichuan, or ONVIF where nothing listens on 9000 (#14). Null: they work. */
+    private static Result presses(String host, int baichuanPort, int onvifPort, String eventsPath, String username, String password, Log log, Texts texts) {
         boolean overOnvif = eventsPath.equals("ONVIF");
         if (!overOnvif) {
             try {
@@ -118,6 +138,12 @@ final class ConnectionCheck {
                 return new Result(false, unreachable(error) ? texts.checkUnreachable(host) : texts.checkNoOnvifEvents());
             }
         }
+        return null;
+    }
+
+    /** Video and talking, once button presses work. */
+    private static Result media(String host, int rtspPort, String rtspPath, String videoPath, String talkPath, String username, String password,
+                                int baichuanPort, int channel, Streams streams, Player player, Log log, Texts texts) {
         boolean onvifTalk;
         RtspSession rtsp = new RtspSession(host, rtspPort, rtspPath, username, password);
         try {

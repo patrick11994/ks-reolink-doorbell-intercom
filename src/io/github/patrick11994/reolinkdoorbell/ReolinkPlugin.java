@@ -110,6 +110,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     @Override public void start(PluginHost host, Map<String, Object> values) {
         stopped = false;
         this.host = host;
+        headless = headless(host);
         Texts.setAssets(host::openAsset);  // the language files under assets/i18n
         settings = new Settings(values);
         this.values = new HashMap<>(values);
@@ -223,6 +224,12 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     @Override public void execute(String command, Map<String, Object> arguments) {
         RingController c = controller;
         if (c == null) return;
+        if (headless) {
+            // No call screen to open or close here: Test ring plays the chime, as a press does.
+            if (command.equals("testRing")) headlessPress("Test ring");
+            else if (!command.equals("show") && !command.equals("dismiss")) throw new IllegalArgumentException("Unknown command " + command);
+            return;
+        }
         switch (command) {
             case "show": c.open(); break;
             case "testRing": c.onVisitor(false); c.onVisitor(true); break;
@@ -346,6 +353,25 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     // Guarded by its own lock, never the plugin's: the controller calls back into that one while holding its own.
     private final PressGate pressGate = new PressGate();
+    // A device without a screen, such as an Echo Dot (#20): a press only plays the chime there, never the call screen.
+    private volatile boolean headless;
+
+    private static boolean headless(PluginHost host) {
+        try {
+            return host.isHeadless();
+        } catch (RuntimeException | LinkageError older) {
+            return false;  // a Kiosk Satellite from before devices without a screen
+        }
+    }
+
+    /** A press on a device without a screen: the chime, as Play a chime says, and the trigger; Ring on this device off: only the trigger. */
+    private void headlessPress(String why) {
+        Settings s = settings;
+        if (s.ring && s.chime) Chime.play(s.chimeVolume, s.chimeStream);
+        log("ring: " + why + (s.ring ? s.chime ? ", chime only: this device has no screen" : ", no chime (Play a chime off), no screen"
+            : ": off on this device (Ring on this device)"));
+        fireTrigger("doorbellPressed");
+    }
 
     /**
      * The doorbell's visitor state, from Baichuan or ONVIF. Ring on this device (#19) off: no chime, screen or call
@@ -355,10 +381,13 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private void visitor(RingController c, boolean visitor) {
         PressGate.Result result;
         synchronized (pressGate) {
-            result = pressGate.report(visitor, settings.ring, System.nanoTime() / 1_000_000);
+            // Without a screen, every press goes the silent way: counted once, and never to the call screen.
+            result = pressGate.report(visitor, settings.ring && !headless, System.nanoTime() / 1_000_000);
         }
         if (result == PressGate.Result.PASS) {
             c.onVisitor(visitor);
+        } else if (result == PressGate.Result.SILENT_PRESS && headless) {
+            headlessPress("a press");
         } else if (result == PressGate.Result.SILENT_PRESS) {
             log("ring: off on this device (Ring on this device), so only Last ring and Doorbell pressed");
             fireTrigger("doorbellPressed");
@@ -412,7 +441,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     @Override public void openViewer(State state, boolean rang) {
         PluginHost h = host;
-        if (h == null) return;
+        if (h == null || headless) return;  // no screen to show it on
         if (settings.wakeScreen) {
             command(h, "stopScreensaver");
             command(h, "screenOn");
@@ -614,6 +643,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             try {
                 h.setupResult(run, "running", t.checking());
                 ConnectionCheck.Result result = !s.channelValid ? new ConnectionCheck.Result(false, t.checkBadChannel())
+                    : headless ? ConnectionCheck.runPresses(s.host, 9000, 8000, s.eventsPath, s.username, s.password, ReolinkPlugin.this::log, t)
                     : ConnectionCheck.run(s.host, 9000, 554, 8000, s.streamPath, s.videoPath, s.talkPath, s.eventsPath, s.username, s.password, s.channel,
                     (path, listener) -> path.equals("RTSP") ? new StreamHub(s.host, 554, s.streamPath, s.username, s.password, listener)
                         : new BaichuanStream(s.host, 9000, s.username, s.password, s.channel, s.streamPath.endsWith("_sub"), listener),
@@ -1133,7 +1163,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         try {
             h.publishSwitch("ring", t.ringControl(), s.ring);
             h.publishSwitch("chime", t.chimeControl(), s.chime);
-            h.publishSwitch("wake_screen", t.wakeControl(), s.wakeScreen);
+            if (!headless) h.publishSwitch("wake_screen", t.wakeControl(), s.wakeScreen);  // no screen to wake
             h.publishNumber("chime_volume", t.chimeVolumeControl(), chimeVolumeRange(), (double) s.chimeVolume);
         } catch (UnsupportedOperationException | LinkageError older) {
             // A Kiosk Satellite without writable entities (an older one lacks the method itself): the settings page has them.

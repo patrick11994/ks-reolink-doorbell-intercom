@@ -55,6 +55,23 @@ public final class ConnectionCheckTest {
             check(refused.message, english.checkLoginRefused());
             doorbell.join(3000);
         }
+        // A device without a screen (#20) checks button presses only: the right password passes without RTSP, the
+        // wrong one is refused, and an empty setting asks for it.
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread doorbell = new Thread(() -> BaichuanClientTest.fakeDoorbell(server, "real", new CopyOnWriteArrayList<>()));
+            doorbell.start();
+            ConnectionCheck.Result dot = ConnectionCheck.runPresses("127.0.0.1", server.getLocalPort(), closed, "Automatic", BaichuanClientTest.USER, "real", LOG, english);
+            check(dot.ok + " " + dot.message, "true " + english.checkOkHeadless());
+            doorbell.join(3000);
+        }
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread doorbell = new Thread(() -> BaichuanClientTest.fakeDoorbell(server, "real", new CopyOnWriteArrayList<>()));
+            doorbell.start();
+            check(ConnectionCheck.runPresses("127.0.0.1", server.getLocalPort(), closed, "Automatic", BaichuanClientTest.USER, "wrong", LOG, english).message,
+                english.checkLoginRefused());
+            doorbell.join(3000);
+        }
+        check(ConnectionCheck.runPresses("", 9000, 8000, "Automatic", "u", "p", LOG, english).message, english.checkNotConfigured());
         // A device whose RTSP answer cannot be read still ends the check with a result.
         try (ServerSocket server = new ServerSocket(0); ServerSocket rtsp = new ServerSocket(0)) {
             Thread doorbell = new Thread(() -> BaichuanClientTest.fakeDoorbell(server, "real", new CopyOnWriteArrayList<>()));

@@ -48,6 +48,8 @@ The cards need Kiosk Satellite's own Home Assistant connection (Settings > Home 
 
 **A doorbell connected to a Reolink NVR or Home Hub** works too: enter the NVR's or Home Hub's address and its login, and set **Channel** to the doorbell's channel as the Reolink app shows it. A Video Doorbell WiFi Gen 2 behind a Home Hub has been reported to work, with **Video over** set to *RTSP*; the Reolink app does not show the channel there, so try 1, 2, 3 and so on.
 
+**On a device without a screen**, such as an Echo Dot running Kiosk Satellite, the plugin plays only the chime on a press: no call screen, video or talking. **Ring on this device**, **Play a chime**, **Chime volume**, *Last ring* and the *Doorbell pressed* trigger work as on a panel, so the Dot can ring along with the panels and be silenced the same way. **Check** tests only the button presses there. The video, talk and card settings can be ignored on such a device.
+
 ## Installation
 
 ### Community Plugins (Recommended)
@@ -222,12 +224,12 @@ The call screen, the messages, the readings and the Check button's results can b
 
 | Language | Translated | Out of date | File |
 | --- | --- | --- | --- |
-| Nederlands | 100% (88 of 88) | – | [`nl.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/nl.properties) |
-| Português (Brasil) | 93% (82 of 88) | – | [`pt-BR.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/pt-BR.properties) |
-| Deutsch | 44% (39 of 88) | – | [`de.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/de.properties) |
-| Français | 5% (5 of 88) | – | [`fr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/fr.properties) |
-| Hrvatski | 93% (82 of 88) | – | [`hr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/hr.properties) |
-| Italiano | 94% (83 of 88) | – | [`it.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/it.properties) |
+| Nederlands | 100% (89 of 89) | – | [`nl.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/nl.properties) |
+| Português (Brasil) | 92% (82 of 89) | – | [`pt-BR.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/pt-BR.properties) |
+| Deutsch | 43% (39 of 89) | – | [`de.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/de.properties) |
+| Français | 5% (5 of 89) | – | [`fr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/fr.properties) |
+| Hrvatski | 92% (82 of 89) | – | [`hr.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/hr.properties) |
+| Italiano | 93% (83 of 89) | – | [`it.properties`](https://github.com/patrick11994/ks-reolink-doorbell-intercom/blob/main/assets/i18n/it.properties) |
 
 <!-- /translations -->
 

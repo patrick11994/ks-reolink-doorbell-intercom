@@ -12,6 +12,7 @@
   "license": "Apache-2.0",
   "icon": "icon.png",
   "capabilities": ["overlay", "host.read", "host.control", "entities"],
+  "headless": true,
   "settings": [
     {"key": "host", "type": "string", "title": "Doorbell address", "default": "", "group": "Doorbell", "description": "IP address or hostname of the doorbell on your network, for example 192.168.1.50. For a doorbell connected to a Reolink NVR, the NVR's address."},
     {"key": "username", "type": "string", "title": "Username", "default": "", "group": "Doorbell", "description": "A Reolink user on the doorbell. A separate non-admin user is enough and recommended."},
