@@ -43,6 +43,11 @@ final class ScreenRestore {
         before = screenOn == null ? null : !screenOn ? Before.OFF : Boolean.TRUE.equals(screensaver) ? Before.SCREENSAVER : Before.DASHBOARD;
     }
 
+    /** A call the plugin did not wake the screen for, such as one opened by hand: nothing to put back. */
+    synchronized void forget() {
+        before = null;
+    }
+
     synchronized Before before() {
         return before;
     }

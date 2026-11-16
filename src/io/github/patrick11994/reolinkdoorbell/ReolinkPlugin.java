@@ -184,6 +184,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }, 1, 1, TimeUnit.SECONDS);
         publishText("last_ring", texts.lastRingReading(), texts.noneYet());
         publishControls();
+        screenRestore = new ScreenRestore();
         if (!headless) followScreen(host);
         connect();
     }
@@ -193,11 +194,12 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         try {
             h.subscribe("screen.state");
             h.subscribe("screensaver.state");
+            ScreenRestore r = screenRestore;
             h.executeCommand("isScreenOn", Collections.<String, Object>emptyMap(), (ok, data, error) -> {
-                if (ok && data instanceof Boolean) screenRestore.readScreen((Boolean) data);
+                if (ok && data instanceof Boolean) r.readScreen((Boolean) data);
             });
             h.executeCommand("isScreensaverActive", Collections.<String, Object>emptyMap(), (ok, data, error) -> {
-                if (ok && data instanceof Boolean) screenRestore.readScreensaver((Boolean) data);
+                if (ok && data instanceof Boolean) r.readScreensaver((Boolean) data);
             });
         } catch (RuntimeException unavailable) {
             log("screen: its state is unknown, so the screen stays on after a call: " + unavailable.getMessage());
@@ -376,7 +378,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     // Guarded by its own lock, never the plugin's: the controller calls back into that one while holding its own.
     private final PressGate pressGate = new PressGate();
-    private final ScreenRestore screenRestore = new ScreenRestore();
+    private volatile ScreenRestore screenRestore = new ScreenRestore();  // new each session: events are not replayed
     // A device without a screen, such as an Echo Dot (#20): a press only plays the chime there, never the call screen.
     private volatile boolean headless;
 
@@ -493,6 +495,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         PluginHost h = host;
         if (h == null || headless) return;  // no screen to show it on
         if (rang && settings.wakeScreen) screenRestore.ring();  // before the wake below changes it
+        else screenRestore.forget();  // this call did not wake the screen: nothing to put back
         if (settings.wakeScreen) {
             command(h, "stopScreensaver");
             command(h, "screenOn");
@@ -567,8 +570,9 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         PluginHost h = host;
         if (h != null) h.hideOverlay(OVERLAY);
         viewerOpen = false;
-        ScreenRestore.Before before = screenRestore.before();
-        String restore = screenRestore.close(settings.restoreScreen);
+        ScreenRestore r = screenRestore;
+        ScreenRestore.Before before = r.before();
+        String restore = r.close(settings.restoreScreen);
         if (before != null) log("screen: before the ring " + before.name().toLowerCase(Locale.ROOT) + ", " + (restore == null ? "left as it is (Restore the screen: " + settings.restoreScreen + ")" : restore));
         if (h != null && restore != null) command(h, restore);
         fireTrigger("callScreenClosed");

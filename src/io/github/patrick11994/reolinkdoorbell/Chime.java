@@ -52,11 +52,18 @@ final class Chime {
             }
             track.play();
             muted(stream, usage, log);
-            int written = track.write(pcm, 0, pcm.length);  // blocks until all of it is queued
-            if (written != pcm.length) log.accept("chime: Android took " + written + " of " + pcm.length + " samples");
-            // Let the queued end play out before stop and release cut it off.
+            // Queued without blocking and then played out, both within a deadline: a stalled output must not keep the
+            // track and this thread forever.
             long deadline = System.nanoTime() + (pcm.length * 1000L / RATE + 1000) * 1_000_000L;
-            while (track.getPlaybackHeadPosition() < Math.max(written, 0) && System.nanoTime() < deadline) Thread.sleep(20);
+            int written = 0;
+            while (written < pcm.length && System.nanoTime() < deadline) {
+                int taken = track.write(pcm, written, pcm.length - written, AudioTrack.WRITE_NON_BLOCKING);
+                if (taken < 0) break;
+                written += taken;
+                if (written < pcm.length) Thread.sleep(10);
+            }
+            if (written != pcm.length) log.accept("chime: Android took " + written + " of " + pcm.length + " samples");
+            while (track.getPlaybackHeadPosition() < written && System.nanoTime() < deadline) Thread.sleep(20);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (RuntimeException unavailable) {
@@ -78,7 +85,8 @@ final class Chime {
             int type = usage == AudioAttributes.USAGE_MEDIA ? AudioManager.STREAM_MUSIC
                 : usage == AudioAttributes.USAGE_ALARM ? AudioManager.STREAM_ALARM : AudioManager.STREAM_RING;
             int volume = audio.getStreamVolume(type), max = audio.getStreamMaxVolume(type);
-            if (volume == 0) log.accept("chime: the " + stream + " volume is 0 of " + max + " on this device, so the chime is silent");
+            String name = type == AudioManager.STREAM_MUSIC ? "media" : type == AudioManager.STREAM_ALARM ? "alarm" : "ring";
+            if (volume == 0) log.accept("chime: the " + name + " volume (Chime sound: " + stream + ") is 0 of " + max + " on this device, so the chime is silent");
             if (type == AudioManager.STREAM_RING && audio.getRingerMode() != AudioManager.RINGER_MODE_NORMAL) {
                 log.accept("chime: this device is on silent or vibrate, which mutes the " + stream + " sound");
             }

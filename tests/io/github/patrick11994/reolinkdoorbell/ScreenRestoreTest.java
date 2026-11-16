@@ -48,6 +48,11 @@ public final class ScreenRestoreTest {
         check(restore.close(WHEN_NOT_ANSWERED), "screenOff");
         check(restore.close(ALWAYS), null);
 
+        // A call opened by hand after a ring that was never closed (the plugin stopped mid-call): nothing to put back.
+        restore.ring();
+        restore.forget();
+        check(restore.close(ALWAYS), null);
+
         // An unknown setting value acts as the default.
         restore.ring();
         restore.answered();
