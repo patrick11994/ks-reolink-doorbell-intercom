@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package io.github.patrick11994.reolinkdoorbell;
 
+import android.content.Context;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
+import android.media.AudioManager;
 import android.media.AudioTrack;
+import java.util.function.Consumer;
 
 /**
  * A synthesized two-tone "ding-dong" on a short-lived thread. It follows one of Android's volumes (notifications,
@@ -19,14 +22,14 @@ final class Chime {
 
     private Chime() {}
 
-    /** percent is the Chime volume setting, stream one of STREAMS. */
-    static void play(int percent, String stream) {
-        Thread thread = new Thread(() -> playNow(percent, stream), "reolink-chime");
+    /** percent is the Chime volume setting, stream one of STREAMS; log hears why a chime may stay silent. */
+    static void play(int percent, String stream, Consumer<String> log) {
+        Thread thread = new Thread(() -> playNow(percent, stream, log), "reolink-chime");
         thread.setDaemon(true);
         thread.start();
     }
 
-    private static void playNow(int percent, String stream) {
+    private static void playNow(int percent, String stream, Consumer<String> log) {
         double[] shape = samples();
         double gain = PEAK * Math.max(0, Math.min(100, percent)) / 100.0;
         short[] pcm = new short[shape.length];
@@ -41,18 +44,42 @@ final class Chime {
                 .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(RATE)
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
                 .setBufferSizeInBytes(pcm.length * 2).setTransferMode(AudioTrack.MODE_STATIC).build();
-            track.write(pcm, 0, pcm.length);
+            if (track.getState() == AudioTrack.STATE_UNINITIALIZED) {
+                log.accept("chime: Android did not open the " + stream + " sound");
+                return;
+            }
+            int written = track.write(pcm, 0, pcm.length);
+            if (written != pcm.length) log.accept("chime: Android took " + written + " of " + pcm.length + " samples");
             track.play();
+            muted(stream, usage, log);
             Thread.sleep(pcm.length * 1000L / RATE + 100);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (RuntimeException unavailable) {
-            // No sound is better than a failed ring.
+            log.accept("chime: no sound: " + unavailable);  // no sound is better than a failed ring
         } finally {
             if (track != null) {
                 try { track.stop(); } catch (RuntimeException ignored) {}
                 track.release();
             }
+        }
+    }
+
+    /** Says so when the Android volume the chime follows is all the way down, such as the ring volume on an Echo Dot (#20). */
+    private static void muted(String stream, int usage, Consumer<String> log) {
+        try {
+            Context app = (Context) Class.forName("android.app.ActivityThread").getMethod("currentApplication").invoke(null);
+            if (app == null) return;
+            AudioManager audio = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
+            int type = usage == AudioAttributes.USAGE_MEDIA ? AudioManager.STREAM_MUSIC
+                : usage == AudioAttributes.USAGE_ALARM ? AudioManager.STREAM_ALARM : AudioManager.STREAM_RING;
+            int volume = audio.getStreamVolume(type), max = audio.getStreamMaxVolume(type);
+            if (volume == 0) log.accept("chime: the " + stream + " volume is 0 of " + max + " on this device, so the chime is silent");
+            if (type == AudioManager.STREAM_RING && audio.getRingerMode() != AudioManager.RINGER_MODE_NORMAL) {
+                log.accept("chime: this device is on silent or vibrate, which mutes the " + stream + " sound");
+            }
+        } catch (ReflectiveOperationException | RuntimeException unknown) {
+            // Only a hint for the logs.
         }
     }
 

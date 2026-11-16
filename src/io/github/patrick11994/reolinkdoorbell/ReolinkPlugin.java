@@ -370,7 +370,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private void headlessPress(String why, boolean test) {
         Settings s = settings;
         boolean chime = headlessChime(s, test);
-        if (chime) Chime.play(s.chimeVolume, s.chimeStream);
+        if (chime) Chime.play(s.chimeVolume, s.chimeStream, this::log);
         log("ring: " + why + (chime ? ", chime only: this device has no screen" : !s.chime ? ", no chime (Play a chime off), no screen"
             : ": off on this device (Ring on this device)"));
         fireTrigger("doorbellPressed");
@@ -1121,7 +1121,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     @Override public void ring() {
         MusicPause m = music;
         if (m != null && settings.musicPause.equals("At the ring")) m.setActive(true);
-        if (settings.chime) Chime.play(settings.chimeVolume, settings.chimeStream);
+        if (settings.chime) Chime.play(settings.chimeVolume, settings.chimeStream, this::log);
     }
 
     @Override public void ringTrigger() {
