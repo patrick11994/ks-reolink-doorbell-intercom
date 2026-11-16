@@ -225,9 +225,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         RingController c = controller;
         if (c == null) return;
         if (headless) {
-            // No call screen to open or close here: Test ring plays the chime, as a press does.
-            if (command.equals("testRing")) headlessPress("Test ring");
-            else if (!command.equals("show") && !command.equals("dismiss")) throw new IllegalArgumentException("Unknown command " + command);
+            if (headlessChimes(command)) headlessPress("Test ring", true);
             return;
         }
         switch (command) {
@@ -364,13 +362,40 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }
     }
 
-    /** A press on a device without a screen: the chime, as Play a chime says, and the trigger; Ring on this device off: only the trigger. */
-    private void headlessPress(String why) {
+    /**
+     * A press on a device without a screen: the chime, as Play a chime says, and the trigger; Ring on this device off:
+     * only the trigger. Test ring chimes even then, as it rings a panel whatever Ring on this device says, so an
+     * automation can ring the device itself (#21).
+     */
+    private void headlessPress(String why, boolean test) {
         Settings s = settings;
-        if (s.ring && s.chime) Chime.play(s.chimeVolume, s.chimeStream);
-        log("ring: " + why + (s.ring ? s.chime ? ", chime only: this device has no screen" : ", no chime (Play a chime off), no screen"
+        boolean chime = headlessChime(s, test);
+        if (chime) Chime.play(s.chimeVolume, s.chimeStream);
+        log("ring: " + why + (chime ? ", chime only: this device has no screen" : !s.chime ? ", no chime (Play a chime off), no screen"
             : ": off on this device (Ring on this device)"));
         fireTrigger("doorbellPressed");
+    }
+
+    /** Whether a press, or Test ring, plays the chime on a device without a screen. */
+    static boolean headlessChime(Settings s, boolean test) {
+        return s.chime && (s.ring || test);
+    }
+
+    /** Whether the doorbell's presses go to the call screen here; without a screen, every press goes the silent way. */
+    static boolean ringsHere(Settings s, boolean headless) {
+        return s.ring && !headless;
+    }
+
+    /** A command on a device without a screen: Test ring chimes; Open and Close have no call screen to act on. */
+    static boolean headlessChimes(String command) {
+        if (command.equals("testRing")) return true;
+        if (command.equals("show") || command.equals("dismiss")) return false;
+        throw new IllegalArgumentException("Unknown command " + command);
+    }
+
+    /** Whether a Home Assistant control is published here: a device without a screen has none to wake. */
+    static boolean publishes(String key, boolean headless) {
+        return !(headless && key.equals("wake_screen"));
     }
 
     /**
@@ -381,13 +406,12 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     private void visitor(RingController c, boolean visitor) {
         PressGate.Result result;
         synchronized (pressGate) {
-            // Without a screen, every press goes the silent way: counted once, and never to the call screen.
-            result = pressGate.report(visitor, settings.ring && !headless, System.nanoTime() / 1_000_000);
+            result = pressGate.report(visitor, ringsHere(settings, headless), System.nanoTime() / 1_000_000);
         }
         if (result == PressGate.Result.PASS) {
             c.onVisitor(visitor);
         } else if (result == PressGate.Result.SILENT_PRESS && headless) {
-            headlessPress("a press");
+            headlessPress("a press", false);
         } else if (result == PressGate.Result.SILENT_PRESS) {
             log("ring: off on this device (Ring on this device), so only Last ring and Doorbell pressed");
             fireTrigger("doorbellPressed");
@@ -1163,7 +1187,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         try {
             h.publishSwitch("ring", t.ringControl(), s.ring);
             h.publishSwitch("chime", t.chimeControl(), s.chime);
-            if (!headless) h.publishSwitch("wake_screen", t.wakeControl(), s.wakeScreen);  // no screen to wake
+            if (publishes("wake_screen", headless)) h.publishSwitch("wake_screen", t.wakeControl(), s.wakeScreen);
             h.publishNumber("chime_volume", t.chimeVolumeControl(), chimeVolumeRange(), (double) s.chimeVolume);
         } catch (UnsupportedOperationException | LinkageError older) {
             // A Kiosk Satellite without writable entities (an older one lacks the method itself): the settings page has them.

@@ -72,6 +72,25 @@ public final class ConnectionCheckTest {
             doorbell.join(3000);
         }
         check(ConnectionCheck.runPresses("", 9000, 8000, "Automatic", "u", "p", LOG, english).message, english.checkNotConfigured());
+        // Without Baichuan, Automatic checks those presses over ONVIF: a PullPoint subscription passes, a refused login
+        // says so. Set to ONVIF, a closed port is the answer.
+        try (ServerSocket onvif = new ServerSocket(0)) {
+            List<String> lines = new CopyOnWriteArrayList<>();
+            Thread doorbell = onvifDoorbell(onvif, true);
+            ConnectionCheck.Result dot = ConnectionCheck.runPresses("127.0.0.1", closed, onvif.getLocalPort(), "Automatic", "u", "p", lines::add, english);
+            check(dot.ok + " " + dot.message, "true " + english.checkOkHeadless());
+            check(lines.get(0).contains("over ONVIF"), true);
+            onvif.close();
+            doorbell.join(3000);
+        }
+        try (ServerSocket onvif = new ServerSocket(0)) {
+            Thread doorbell = onvifDoorbell(onvif, false);
+            check(ConnectionCheck.runPresses("127.0.0.1", closed, onvif.getLocalPort(), "Automatic", "u", "wrong", LOG, english).message,
+                english.checkLoginRefused());
+            onvif.close();
+            doorbell.join(3000);
+        }
+        check(ConnectionCheck.runPresses("127.0.0.1", closed, closed, "ONVIF", "u", "p", LOG, english).message, english.checkUnreachable("127.0.0.1"));
         // A device whose RTSP answer cannot be read still ends the check with a result.
         try (ServerSocket server = new ServerSocket(0); ServerSocket rtsp = new ServerSocket(0)) {
             Thread doorbell = new Thread(() -> BaichuanClientTest.fakeDoorbell(server, "real", new CopyOnWriteArrayList<>()));
@@ -244,6 +263,37 @@ public final class ConnectionCheckTest {
             camera.join(3000);
             return message;
         }
+    }
+
+    /** An ONVIF event service that subscribes once a request carries a login when {@code accepts}, or keeps refusing. */
+    private static Thread onvifDoorbell(ServerSocket server, boolean accepts) {
+        Thread doorbell = new Thread(() -> {
+            while (!server.isClosed()) {
+                try (java.net.Socket socket = server.accept()) {
+                    byte[] buffer = new byte[16384];
+                    int read = socket.getInputStream().read(buffer);
+                    String request = new String(buffer, 0, Math.max(read, 0), java.nio.charset.StandardCharsets.US_ASCII);
+                    String answer;
+                    if (!accepts || !request.contains("Authorization:")) {
+                        answer = "HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Digest realm=\"camara\", qop=\"auth\", nonce=\"n1\"\r\n"
+                            + "Content-Length: 0\r\nConnection: close\r\n\r\n";
+                    } else {
+                        String body = request.contains("CreatePullPointSubscription")
+                            ? "<tev:CreatePullPointSubscriptionResponse><tev:SubscriptionReference><wsa5:Address>http://127.0.0.1/onvif/PullSubManager?Idx=1"
+                                + "</wsa5:Address></tev:SubscriptionReference></tev:CreatePullPointSubscriptionResponse>"
+                            : "<wsnt:UnsubscribeResponse/>";
+                        answer = "HTTP/1.1 200 OK\r\nContent-Type: application/soap+xml\r\nContent-Length: " + body.length()
+                            + "\r\nConnection: close\r\n\r\n" + body;
+                    }
+                    socket.getOutputStream().write(answer.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+                } catch (Exception closedEarly) {
+                    return;
+                }
+            }
+        });
+        doorbell.setDaemon(true);
+        doorbell.start();
+        return doorbell;
     }
 
     private static void check(Object actual, Object expected) {
