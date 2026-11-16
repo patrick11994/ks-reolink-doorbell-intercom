@@ -32,27 +32,31 @@ final class Chime {
     private static void playNow(int percent, String stream, Consumer<String> log) {
         double[] shape = samples();
         double gain = PEAK * Math.max(0, Math.min(100, percent)) / 100.0;
-        short[] pcm = new short[shape.length];
-        for (int i = 0; i < pcm.length; i++) pcm[i] = (short) Math.round(shape[i] * gain);
+        short[] pcm = new short[shape.length + RATE * 3 / 10];  // 0.3 s of silence after it, so the speaker plays the end before stop
+        for (int i = 0; i < shape.length; i++) pcm[i] = (short) Math.round(shape[i] * gain);
         int usage = "Media".equals(stream) ? AudioAttributes.USAGE_MEDIA
             : "Alarm".equals(stream) ? AudioAttributes.USAGE_ALARM : AudioAttributes.USAGE_NOTIFICATION_RINGTONE;
         AudioTrack track = null;
         try {
+            // Streamed, not static: an Echo Dot cannot create a static track at all (#20), streaming plays everywhere.
+            AudioFormat format = new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(RATE)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build();
+            int buffer = Math.max(AudioTrack.getMinBufferSize(RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT) * 2, RATE / 5 * 2);
             track = new AudioTrack.Builder()
                 .setAudioAttributes(new AudioAttributes.Builder().setUsage(usage)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
-                .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(RATE)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                .setBufferSizeInBytes(pcm.length * 2).setTransferMode(AudioTrack.MODE_STATIC).build();
+                .setAudioFormat(format).setBufferSizeInBytes(buffer).setTransferMode(AudioTrack.MODE_STREAM).build();
             if (track.getState() == AudioTrack.STATE_UNINITIALIZED) {
                 log.accept("chime: Android did not open the " + stream + " sound");
                 return;
             }
-            int written = track.write(pcm, 0, pcm.length);
-            if (written != pcm.length) log.accept("chime: Android took " + written + " of " + pcm.length + " samples");
             track.play();
             muted(stream, usage, log);
-            Thread.sleep(pcm.length * 1000L / RATE + 100);
+            int written = track.write(pcm, 0, pcm.length);  // blocks until all of it is queued
+            if (written != pcm.length) log.accept("chime: Android took " + written + " of " + pcm.length + " samples");
+            // Let the queued end play out before stop and release cut it off.
+            long deadline = System.nanoTime() + (pcm.length * 1000L / RATE + 1000) * 1_000_000L;
+            while (track.getPlaybackHeadPosition() < Math.max(written, 0) && System.nanoTime() < deadline) Thread.sleep(20);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         } catch (RuntimeException unavailable) {
