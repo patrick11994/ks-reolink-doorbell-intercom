@@ -23,6 +23,7 @@ public final class SettingsTest {
         Map<String, Function<ReolinkPlugin.Settings, Object>> parsed = new HashMap<>();
         parsed.put("chimeStream", s -> s.chimeStream);
         parsed.put("musicPause", s -> s.musicPause);
+        parsed.put("restoreScreen", s -> s.restoreScreen);
         parsed.put("stream", s -> s.streamPath);
         parsed.put("videoSource", s -> s.videoPath);
         parsed.put("talk", s -> s.talkPath);

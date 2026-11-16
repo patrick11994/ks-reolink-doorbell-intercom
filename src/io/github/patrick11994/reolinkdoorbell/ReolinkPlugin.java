@@ -184,7 +184,24 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }, 1, 1, TimeUnit.SECONDS);
         publishText("last_ring", texts.lastRingReading(), texts.noneYet());
         publishControls();
+        if (!headless) followScreen(host);
         connect();
+    }
+
+    /** The screen and screensaver states, for Restore the screen: events first, then the reads for where they start. */
+    private void followScreen(PluginHost h) {
+        try {
+            h.subscribe("screen.state");
+            h.subscribe("screensaver.state");
+            h.executeCommand("isScreenOn", Collections.<String, Object>emptyMap(), (ok, data, error) -> {
+                if (ok && data instanceof Boolean) screenRestore.readScreen((Boolean) data);
+            });
+            h.executeCommand("isScreensaverActive", Collections.<String, Object>emptyMap(), (ok, data, error) -> {
+                if (ok && data instanceof Boolean) screenRestore.readScreensaver((Boolean) data);
+            });
+        } catch (RuntimeException unavailable) {
+            log("screen: its state is unknown, so the screen stays on after a call: " + unavailable.getMessage());
+        }
     }
 
     @Override public void configure(Map<String, Object> values) {
@@ -253,6 +270,14 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         }
         if (event.startsWith("switch.") || event.startsWith("number.")) {
             control(event, payload);
+            return;
+        }
+        if ("ks.screen.state".equals(event)) {
+            screenRestore.screen(Boolean.TRUE.equals(payload.get("on")));
+            return;
+        }
+        if ("ks.screensaver.state".equals(event)) {
+            screenRestore.screensaver(Boolean.TRUE.equals(payload.get("active")));
             return;
         }
         if ("overlay.closed".equals(event) && OVERLAY.equals(payload.get("key"))) {
@@ -351,6 +376,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     // Guarded by its own lock, never the plugin's: the controller calls back into that one while holding its own.
     private final PressGate pressGate = new PressGate();
+    private final ScreenRestore screenRestore = new ScreenRestore();
     // A device without a screen, such as an Echo Dot (#20): a press only plays the chime there, never the call screen.
     private volatile boolean headless;
 
@@ -466,6 +492,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     @Override public void openViewer(State state, boolean rang) {
         PluginHost h = host;
         if (h == null || headless) return;  // no screen to show it on
+        if (rang && settings.wakeScreen) screenRestore.ring();  // before the wake below changes it
         if (settings.wakeScreen) {
             command(h, "stopScreensaver");
             command(h, "screenOn");
@@ -540,6 +567,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         PluginHost h = host;
         if (h != null) h.hideOverlay(OVERLAY);
         viewerOpen = false;
+        ScreenRestore.Before before = screenRestore.before();
+        String restore = screenRestore.close(settings.restoreScreen);
+        if (before != null) log("screen: before the ring " + before.name().toLowerCase(Locale.ROOT) + ", " + (restore == null ? "left as it is (Restore the screen: " + settings.restoreScreen + ")" : restore));
+        if (h != null && restore != null) command(h, restore);
         fireTrigger("callScreenClosed");
         followCards(Collections.<Cards.Card>emptyList());
         stopMedia();
@@ -601,6 +632,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     }
 
     @Override public synchronized void setAudio(boolean speakerOn, boolean micOn) {
+        if (speakerOn || micOn) screenRestore.answered();  // Speaker or Answer: for Restore the screen's When not answered
         WakeWordGuard guard = wakeWord;
         if (guard != null) guard.setActive(speakerOn || micOn);
         MusicPause m = music;
@@ -1260,7 +1292,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     /** The validated settings as plain fields. */
     static final class Settings {
-        final String host, username, password, streamPath, language, microphone, micRate, musicPause, chimeStream, talkPath, videoPath, eventsPath;
+        final String host, username, password, streamPath, language, microphone, micRate, musicPause, restoreScreen, chimeStream, talkPath, videoPath, eventsPath;
         private final String name;
         final boolean ring, chime, wakeScreen, wakeWordRestore, musicRestore, callMode, pushToTalk;
         final long autoCloseMillis, maxCallMillis;
@@ -1295,6 +1327,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             chimeStream = java.util.Arrays.asList(Chime.STREAMS).contains(sound) ? sound : "Notifications";
             String pause = string(values, "musicPause");
             musicPause = pause.equals("At the ring") || pause.equals("At Speaker or Answer") ? pause : "Off";
+            String restore = string(values, "restoreScreen");
+            restoreScreen = java.util.Arrays.asList(ScreenRestore.MODES).contains(restore) ? restore : ScreenRestore.WHEN_NOT_ANSWERED;
             wakeScreen = !Boolean.FALSE.equals(values.get("wakeScreen"));
             ring = !Boolean.FALSE.equals(values.get("ring"));
             autoCloseMillis = autoClose(string(values, "autoClose"));
