@@ -81,7 +81,7 @@ final class Chime {
     /** Says so when the Android volume the chime follows is all the way down, such as the ring volume on an Echo Dot (#20). */
     private static void muted(String stream, int usage, Consumer<String> log) {
         try {
-            Context app = (Context) Class.forName("android.app.ActivityThread").getMethod("currentApplication").invoke(null);
+            Context app = app();
             if (app == null) return;
             AudioManager audio = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
             int type = usage == AudioAttributes.USAGE_MEDIA ? AudioManager.STREAM_MUSIC
@@ -92,8 +92,17 @@ final class Chime {
             if (type == AudioManager.STREAM_RING && audio.getRingerMode() != AudioManager.RINGER_MODE_NORMAL) {
                 log.accept("chime: this device is on silent or vibrate, which mutes the " + stream + " sound");
             }
-        } catch (ReflectiveOperationException | RuntimeException unknown) {
+        } catch (RuntimeException unknown) {
             // Only a hint for the logs.
+        }
+    }
+
+    /** Kiosk Satellite's application, which a plugin runs in; start gives no Context. Null if Android hides it. */
+    static Context app() {
+        try {
+            return (Context) Class.forName("android.app.ActivityThread").getMethod("currentApplication").invoke(null);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError hidden) {
+            return null;
         }
     }
 

@@ -498,6 +498,15 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     @Override public void openViewer(State state, boolean rang) {
         PluginHost h = host;
         if (h == null || headless) return;  // no screen to show it on
+        synchronized (this) {
+            // Start with the speaker on starts the door's sound before the call screen exists (and gives its Context):
+            // call mode and the call volume must be there already, so the sound starts in call mode.
+            Context app = callMode == null ? Chime.app() : null;
+            if (app != null) {
+                if (callVolume == null) callVolume = new CallVolume(app);
+                callMode = new CallMode(app);
+            }
+        }
         if (rang && settings.wakeScreen) screenRestore.ring();  // before the wake below changes it
         else screenRestore.forget();  // this call did not wake the screen: nothing to put back
         if (settings.wakeScreen) {
@@ -649,9 +658,13 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         ScheduledExecutorService t = ticker;
         if (speakerOn && !micOn && audioRenderer == null && wait > 0 && t != null) {
             // Call mode now would cut the chime off (Start with the speaker on): the door's sound starts once it is over.
-            log("audio: speaker after the chime, in " + wait + " ms");
-            t.schedule(() -> speakerAfterChime(generation), wait, TimeUnit.MILLISECONDS);
-            return;
+            try {
+                t.schedule(() -> speakerAfterChime(generation), wait, TimeUnit.MILLISECONDS);
+                log("audio: speaker after the chime, in " + wait + " ms");
+                return;
+            } catch (java.util.concurrent.RejectedExecutionException stopping) {
+                // The plugin is stopping: nothing left to wait for.
+            }
         }
         applyAudio(speakerOn, micOn);
     }

@@ -45,6 +45,9 @@ public final class RingControllerTest {
         speakerAtRingOpensTheCall();
         speakerAtRingAnsweredByTheMicrophone();
         speakerAtRingClosesUnanswered();
+        speakerAtRingTouchKeepsItOpen();
+        speakerAtRingDuringACallByHand();
+        ringScreenTakenOnce();
         System.out.println("RingControllerTest passed");
     }
 
@@ -370,6 +373,60 @@ public final class RingControllerTest {
         now += 30_000;
         c.onVisitor(true);
         check(c.state(), State.RINGING);
+    }
+
+    /** A touch starts the time to answer over; the call time does not cut that short, nor count a missed ring out. */
+    static void speakerAtRingTouchKeepsItOpen() {
+        Recorder r = new Recorder();
+        RingController c = controller(r);  // auto-close 1 minute
+        c.setSpeakerAtRing(true);
+        c.setMaxCallMillis(60_000);
+        c.onVisitor(true);
+        now += 50_000;
+        c.touched();
+        r.take();
+        now += 30_000;  // past the call time from the ring, inside the restarted countdown
+        c.tick();
+        check(r.take(), "");
+        now += 30_000;
+        c.tick();
+        check(r.take(), "missed, audio speaker=false mic=false, close");
+    }
+
+    /** With the setting on, a ring during a call opened by hand still only chimes: no countdown, nothing to answer. */
+    static void speakerAtRingDuringACallByHand() {
+        Recorder r = new Recorder();
+        RingController c = controller(r);
+        c.setSpeakerAtRing(true);
+        c.open();
+        r.take();
+        c.onVisitor(true);
+        check(r.take(), "trigger, ring");
+        c.toggleMic();
+        check(r.take(), "audio speaker=false mic=true, update IN_CALL speaker=false mic=true");
+        check(r.taken, 0);
+        c.touched();  // nothing counts down in a call opened by hand
+        check(r.take(), "");
+    }
+
+    /** On the ring screen, Speaker then Answer take the ring once each way, as Restore the screen counts it. */
+    static void ringScreenTakenOnce() {
+        Recorder r = new Recorder();
+        RingController c = controller(r);
+        c.onVisitor(true);
+        c.speaker();
+        check(r.taken, 1);
+        c.answer();
+        check(r.taken, 2);
+        c.hangUp();
+        c.onVisitor(false);
+        now += 30_000;
+        c.onVisitor(true);
+        c.talk();  // push to talk answers too
+        check(r.taken, 3);
+        c.toggleMic();
+        c.toggleMic();  // later mutes answer nothing
+        check(r.taken, 3);
     }
 
     private static void check(Object actual, Object expected) {

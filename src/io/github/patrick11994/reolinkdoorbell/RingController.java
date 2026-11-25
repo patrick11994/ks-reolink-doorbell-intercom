@@ -231,7 +231,8 @@ public final class RingController {
             hangUp();
             return;
         }
-        if (state == State.RINGING) return;
+        // The call time starts once someone answers; until then the auto-close time decides (Off: the call time).
+        if (state == State.RINGING || (counting && autoCloseMillis > 0)) return;
         if (maxCallMillis > 0 && clock.now() - callStarted >= maxCallMillis) hangUp();
     }
 
