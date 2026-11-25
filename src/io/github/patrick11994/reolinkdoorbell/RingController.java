@@ -4,8 +4,9 @@ package io.github.patrick11994.reolinkdoorbell;
 /**
  * The doorbell call as a state machine, free of Android and the SDK so it can be tested on its own.
  * Only a button press (visitor) rings; motion and person detection never do. An untouched ring closes itself after
- * the auto-close time; Speaker or Answer end that countdown for the rest of the call. A viewer opened by hand has
- * no countdown.
+ * the auto-close time; Speaker or Answer end that countdown for the rest of the call. With Start with the speaker on,
+ * a ring opens the call listening, and the microphone ends the countdown instead. A viewer opened by hand has no
+ * countdown.
  *
  * idle → ringing (button pressed) → listening (Speaker) → in call (Answer) → idle (Hang up / End call)
  * idle → in call with microphone and speaker off (opened by hand) → idle
@@ -22,8 +23,10 @@ public final class RingController {
         void setAudio(boolean speakerOn, boolean micOn);
         void ring();
         void ringTrigger();
-        /** Answer pressed, or Talk first held, after a ring. */
+        /** Answer pressed, or Talk first held, after a ring; with Start with the speaker on, the microphone turned on. */
         void answeredTrigger();
+        /** Someone took the ring: Speaker or Answer, or the microphone with Start with the speaker on. */
+        void taken();
         /** A ring closed itself after the auto-close time, without anyone pressing Speaker or Answer. */
         void missedTrigger();
         /** The auto-close countdown (re)started at startedAt and runs for durationMillis; durationMillis 0 hides it. */
@@ -44,6 +47,7 @@ public final class RingController {
     private boolean micOn;
     private long autoCloseMillis;
     private long maxCallMillis;
+    private boolean speakerAtRing;  // Start with the speaker on: a ring opens the call, speaker on, microphone off
     private long callStarted;  // when listening, talking or watching by hand began
 
     public interface Clock {
@@ -77,6 +81,11 @@ public final class RingController {
         maxCallMillis = millis;
     }
 
+    /** Start with the speaker on: a ring opens straight into the call, listening, until someone turns the microphone on. */
+    public synchronized void setSpeakerAtRing(boolean on) {
+        speakerAtRing = on;
+    }
+
     /** The doorbell's visitor flag, from every push. Only the rising edge rings. */
     public synchronized void onVisitor(boolean visitor) {
         long now = clock.now();
@@ -88,9 +97,21 @@ public final class RingController {
         if (state == State.IN_CALL) {
             // Only watching (opened by hand, microphone and speaker off): still chime, so a visitor is not missed.
             if (!micOn && !speakerOn) actions.ring();
+            if (counting) restartCountdown(now);  // rung straight into the call, not answered yet: the time starts over
             return;
         }
         actions.ring();
+        if (state == State.IDLE && speakerAtRing) {
+            // Straight into the call, listening: the time to answer still runs out as on the ring screen.
+            state = State.IN_CALL;
+            callStarted = now;
+            speakerOn = true;
+            micOn = false;
+            actions.openViewer(state, true);
+            actions.setAudio(true, false);
+            restartCountdown(now);
+            return;
+        }
         if (state == State.IDLE) {
             state = State.RINGING;
             actions.openViewer(state, true);
@@ -123,6 +144,7 @@ public final class RingController {
         micOn = false;
         actions.setAudio(true, false);
         actions.updateViewer(state, speakerOn, micOn);
+        actions.taken();
     }
 
     /** Ringing or listening: talk, with the speaker on too. */
@@ -138,6 +160,7 @@ public final class RingController {
         actions.setAudio(true, true);
         actions.updateViewer(state, speakerOn, micOn);
         actions.answeredTrigger();
+        actions.taken();
     }
 
     /**
@@ -153,6 +176,7 @@ public final class RingController {
         micOn = true;
         actions.setAudio(speakerOn, true);
         actions.updateViewer(state, speakerOn, micOn);
+        answeredInCall();
     }
 
     /** In call: mute or unmute the door audio. */
@@ -169,6 +193,16 @@ public final class RingController {
         micOn = !micOn;
         actions.setAudio(speakerOn, micOn);
         actions.updateViewer(state, speakerOn, micOn);
+        if (micOn) answeredInCall();
+    }
+
+    /** The microphone on in a call a ring opened with the speaker on: that answers it, once. */
+    private void answeredInCall() {
+        if (!counting) return;
+        stopCountdown();
+        callStarted = clock.now();
+        actions.answeredTrigger();
+        actions.taken();
     }
 
     /** Hang up, End call, Back or the viewer closing on its own. */
@@ -185,19 +219,19 @@ public final class RingController {
 
     /** A touch on the viewer while it rings starts the auto-close time over. */
     public synchronized void touched() {
-        if (state == State.RINGING && counting) restartCountdown(clock.now());
+        if (counting) restartCountdown(clock.now());
     }
 
     /** Called about once a second: closes a viewer that rang untouched, and ends a call that reached its maximum length. */
     public synchronized void tick() {
         if (state == State.IDLE) return;
-        if (state == State.RINGING) {
-            if (counting && autoCloseMillis > 0 && clock.now() - lastActivity >= autoCloseMillis) {
-                actions.missedTrigger();
-                hangUp();
-            }
+        // A ring nobody took yet, on the ring screen or straight in the call: closes after the auto-close time.
+        if (counting && autoCloseMillis > 0 && clock.now() - lastActivity >= autoCloseMillis) {
+            actions.missedTrigger();
+            hangUp();
             return;
         }
+        if (state == State.RINGING) return;
         if (maxCallMillis > 0 && clock.now() - callStarted >= maxCallMillis) hangUp();
     }
 

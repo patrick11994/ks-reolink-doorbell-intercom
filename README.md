@@ -92,6 +92,7 @@ Or search for `Reolink Doorbell Intercom` in **Settings > Plugin Manager > Brows
 | Ringing | **Pause music** | *Off*, *At the ring* or *At Speaker or Answer*. Pauses the kiosk's music during a call and resumes it when the call screen closes, but only music that was playing. Opened by hand, it pauses once Speaker or Microphone is on. | Off |
 | Ringing | **Wake the screen** | Turns the screen on and closes the screensaver on a ring | on |
 | Ringing | **Restore the screen** | *When not answered*, *Always* or *Never*. After a ring woke the screen, turns it off again or starts the screensaver again once the call screen closes, whichever it was doing before. The dashboard stays as it was. *When not answered* skips this when someone pressed Speaker or Answer. | When not answered |
+| Ringing | **Start with the speaker on** | A ring opens the call with the door's sound on and your microphone off, instead of the ring screen. Turning the microphone on answers it. Until then, it closes after **Close the viewer after**, as a ring does. | off |
 | Ringing | **Close the viewer after** | 30 seconds to 5 minutes, or Off. Counts only while it rings untouched. | 1 minute |
 | Ringing | **End a call after** | 5, 10 or 30 minutes, or Off. Counts from Answer, Speaker or opening it by hand, so a forgotten call does not keep the room on the line. | 10 minutes |
 | Video and audio | **Video over** | *Automatic* (Baichuan, and RTSP if Baichuan fails before the first picture), *Baichuan* or *RTSP* | Automatic |

@@ -76,6 +76,8 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     // ONVIF: talk opens at the ring and stays; Baichuan only while the microphone is on. Set from talk's own thread
     // when Automatic falls back, so volatile.
     private volatile boolean talkFromRing;
+    private volatile long chimeEnds;  // nanoTime in ms when the last chime is over: call mode would silence it before
+    private int audioGeneration;  // each setAudio: a speaker held back for the chime only starts if nothing changed since
     // Automatic talk found that this doorbell refuses Baichuan talk: ONVIF straight away, until the settings change,
     // instead of losing 1-2.5 s on each talk start.
     private volatile boolean baichuanTalkRefused;
@@ -121,6 +123,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         // Monotonic: a clock set after boot (no RTC battery, NTP) must not end a ring at once or stretch a call.
         controller = new RingController(this, () -> System.nanoTime() / 1_000_000, settings.autoCloseMillis);
         controller.setMaxCallMillis(settings.maxCallMillis);
+        controller.setSpeakerAtRing(settings.speakerAtRing);
         wakeWord = new WakeWordGuard(new WakeWordGuard.Host() {
             @Override public void command(String name, Map<String, Object> arguments, WakeWordGuard.Result result) {
                 PluginHost h = ReolinkPlugin.this.host;
@@ -225,6 +228,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
         if (c != null) {
             c.setAutoCloseMillis(settings.autoCloseMillis);
             c.setMaxCallMillis(settings.maxCallMillis);
+            c.setSpeakerAtRing(settings.speakerAtRing);
         }
         publishControls();
         if (previous == null || !previous.sameConnection(settings)) connect();
@@ -636,11 +640,27 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     }
 
     @Override public synchronized void setAudio(boolean speakerOn, boolean micOn) {
-        if (speakerOn || micOn) screenRestore.answered();  // Speaker or Answer: for Restore the screen's When not answered
         WakeWordGuard guard = wakeWord;
         if (guard != null) guard.setActive(speakerOn || micOn);
         MusicPause m = music;
         if (m != null && (speakerOn || micOn) && !settings.musicPause.equals("Off")) m.setActive(true);
+        int generation = ++audioGeneration;
+        long wait = chimeEnds - System.nanoTime() / 1_000_000;
+        ScheduledExecutorService t = ticker;
+        if (speakerOn && !micOn && audioRenderer == null && wait > 0 && t != null) {
+            // Call mode now would cut the chime off (Start with the speaker on): the door's sound starts once it is over.
+            log("audio: speaker after the chime, in " + wait + " ms");
+            t.schedule(() -> speakerAfterChime(generation), wait, TimeUnit.MILLISECONDS);
+            return;
+        }
+        applyAudio(speakerOn, micOn);
+    }
+
+    private synchronized void speakerAfterChime(int generation) {
+        if (generation == audioGeneration && viewerOpen && !stopped) applyAudio(true, false);
+    }
+
+    private void applyAudio(boolean speakerOn, boolean micOn) {
         log("audio: speaker " + speakerOn + ", microphone " + micOn + (stream == null ? ", no stream" : ""));
         // Before the track and the recorder open, so both start in call mode; left again only when the call ends.
         if ((speakerOn || micOn) && settings.callMode && callMode != null) {
@@ -1157,7 +1177,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     @Override public void ring() {
         MusicPause m = music;
         if (m != null && settings.musicPause.equals("At the ring")) m.setActive(true);
-        if (settings.chime) Chime.play(settings.chimeVolume, settings.chimeStream, this::log);
+        if (settings.chime) {
+            chimeEnds = System.nanoTime() / 1_000_000 + Chime.MILLIS;
+            Chime.play(settings.chimeVolume, settings.chimeStream, this::log);
+        }
     }
 
     @Override public void ringTrigger() {
@@ -1166,6 +1189,10 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
 
     @Override public void answeredTrigger() {
         fireTrigger("answered");
+    }
+
+    @Override public void taken() {
+        screenRestore.answered();  // for Restore the screen's When not answered
     }
 
     @Override public void missedTrigger() {
@@ -1298,7 +1325,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
     static final class Settings {
         final String host, username, password, streamPath, language, microphone, micRate, musicPause, restoreScreen, chimeStream, talkPath, videoPath, eventsPath;
         private final String name;
-        final boolean ring, chime, wakeScreen, wakeWordRestore, musicRestore, callMode, pushToTalk;
+        final boolean ring, chime, wakeScreen, speakerAtRing, wakeWordRestore, musicRestore, callMode, pushToTalk;
         final long autoCloseMillis, maxCallMillis;
         final int callVolume, chimeVolume;
         final int channel;  // behind an NVR, the doorbell's channel there, counted from 0; 0 for a doorbell reached directly
@@ -1334,6 +1361,7 @@ public final class ReolinkPlugin implements KioskPlugin, RingController.Actions 
             String restore = string(values, "restoreScreen");
             restoreScreen = java.util.Arrays.asList(ScreenRestore.MODES).contains(restore) ? restore : ScreenRestore.WHEN_NOT_ANSWERED;
             wakeScreen = !Boolean.FALSE.equals(values.get("wakeScreen"));
+            speakerAtRing = Boolean.TRUE.equals(values.get("speakerAtRing"));
             ring = !Boolean.FALSE.equals(values.get("ring"));
             autoCloseMillis = autoClose(string(values, "autoClose"));
             maxCallMillis = maxCall(string(values, "maxCall"));

@@ -10,6 +10,7 @@ public final class RingControllerTest {
 
     private static final class Recorder implements RingController.Actions {
         final List<String> calls = new ArrayList<>();
+        int taken;  // counted apart, so the other sequences read as before
         @Override public void openViewer(State state, boolean rang) { calls.add("open " + state + (rang ? " rang" : "")); }
         @Override public void updateViewer(State state, boolean speakerOn, boolean micOn) { calls.add("update " + state + " speaker=" + speakerOn + " mic=" + micOn); }
         @Override public void closeViewer() { calls.add("close"); }
@@ -18,6 +19,7 @@ public final class RingControllerTest {
         @Override public void ringTrigger() { calls.add("trigger"); }
         @Override public void answeredTrigger() { calls.add("answered"); }
         @Override public void missedTrigger() { calls.add("missed"); }
+        @Override public void taken() { taken++; }
         @Override public void countdown(long startedAt, long durationMillis) {
             calls.add(durationMillis <= 0 ? "countdown off" : "countdown " + (startedAt - START) / 1000 + "s+" + durationMillis / 1000 + "s");
         }
@@ -40,6 +42,9 @@ public final class RingControllerTest {
         talkInAViewerOpenedByHand();
         callEndsAtMaximumLength();
         pressDuringCallDoesNotRing();
+        speakerAtRingOpensTheCall();
+        speakerAtRingAnsweredByTheMicrophone();
+        speakerAtRingClosesUnanswered();
         System.out.println("RingControllerTest passed");
     }
 
@@ -278,6 +283,93 @@ public final class RingControllerTest {
         now += 30_000;
         c.onVisitor(true);
         check(r.take(), "trigger");
+    }
+
+    /** Start with the speaker on: a ring opens the call listening, chimes, and counts down to close as a ring does. */
+    static void speakerAtRingOpensTheCall() {
+        Recorder r = new Recorder();
+        RingController c = controller(r);
+        c.setSpeakerAtRing(true);
+        c.onVisitor(true);
+        check(r.take(), "trigger, ring, open IN_CALL rang, audio speaker=true mic=false, countdown 0s+60s");
+        check(c.speakerOn() + " " + c.micOn(), "true false");
+        check(r.taken, 0);  // the speaker alone takes nothing: it came on by itself
+
+        // A second press while nobody answered: no chime over the door's sound, the time starts over.
+        c.onVisitor(false);
+        now += 30_000;
+        c.onVisitor(true);
+        check(r.take(), "trigger, countdown 30s+60s");
+        // A touch starts it over too; the speaker toggles without answering.
+        now += 10_000;
+        c.touched();
+        c.toggleSpeaker();
+        check(r.take(), "countdown 40s+60s, audio speaker=false mic=false, update IN_CALL speaker=false mic=false");
+        check(r.taken, 0);
+    }
+
+    /** The microphone answers it, once: the countdown stops, Answered fires, and the call time starts from there. */
+    static void speakerAtRingAnsweredByTheMicrophone() {
+        Recorder r = new Recorder();
+        RingController c = controller(r);
+        c.setSpeakerAtRing(true);
+        c.setMaxCallMillis(600_000);
+        c.onVisitor(true);
+        r.take();
+        now += 50_000;
+        c.toggleMic();
+        check(r.take(), "audio speaker=true mic=true, update IN_CALL speaker=true mic=true, countdown off, answered");
+        check(r.taken, 1);
+        c.toggleMic();
+        c.toggleMic();  // muting and unmuting later answers nothing again
+        r.take();
+        check(r.taken, 1);
+        now += 10 * 60_000 - 1_000;  // the call time counts from the answer, not from the ring
+        c.tick();
+        check(r.take(), "");
+        now += 1_000;
+        c.tick();
+        check(r.take(), "audio speaker=false mic=false, close");
+
+        // Push to talk answers the same way.
+        c.onVisitor(false);
+        now += 30_000;
+        c.onVisitor(true);
+        r.take();
+        c.talk();
+        check(r.take(), "audio speaker=true mic=true, update IN_CALL speaker=true mic=true, countdown off, answered");
+    }
+
+    /** Nobody turned the microphone on: it closes as a missed ring; with Close the viewer after off, the call time ends it. */
+    static void speakerAtRingClosesUnanswered() {
+        Recorder r = new Recorder();
+        RingController c = controller(r);
+        c.setSpeakerAtRing(true);
+        c.onVisitor(true);
+        r.take();
+        now += 59_000;
+        c.tick();
+        check(r.take(), "");
+        now += 1_000;
+        c.tick();
+        check(r.take(), "missed, audio speaker=false mic=false, close");
+
+        c.setAutoCloseMillis(0);
+        c.setMaxCallMillis(600_000);
+        c.onVisitor(false);
+        now += 30_000;
+        c.onVisitor(true);
+        r.take();
+        now += 600_000;
+        c.tick();
+        check(r.take(), "audio speaker=false mic=false, close");
+
+        // Off again: a ring shows the ring screen, as before.
+        c.setSpeakerAtRing(false);
+        c.onVisitor(false);
+        now += 30_000;
+        c.onVisitor(true);
+        check(c.state(), State.RINGING);
     }
 
     private static void check(Object actual, Object expected) {

@@ -18,6 +18,8 @@ final class Chime {
     private static final double PEAK = 32767 * 0.89;  // -1 dBFS at 100 %
     /** The Chime sound setting's options. */
     static final String[] STREAMS = {"Notifications", "Media", "Alarm"};
+    /** How long a chime sounds, about, from play: 1.8 s of ding-dong, the silence after it and the track starting. */
+    static final long MILLIS = 2_300;
     private static volatile double[] samples;  // peak 1.0
 
     private Chime() {}
